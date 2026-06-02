@@ -31,7 +31,7 @@ func textHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	article, err := fetchReadableWithFallback(rawURL)
+	article, err := fetchReadable(rawURL)
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusBadGateway)
 		return
@@ -43,17 +43,6 @@ func textHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(article.TextContent))
 }
 
-func fetchReadableWithFallback(rawURL string) (readability.Article, error) {
-	article, err := fetchReadable(rawURL)
-	if err != nil || article.Title == "Just a moment..." {
-		if err == nil {
-			log.Printf("cloudflare challenge detected for %s, retrying via proxy", rawURL)
-		}
-		proxyURL := feedProxyURL + "?url=" + rawURL
-		return fetchReadable(proxyURL)
-	}
-	return article, nil
-}
 
 func articleHandler(w http.ResponseWriter, r *http.Request) {
 	rawURL := r.URL.Query().Get("url")
@@ -79,7 +68,7 @@ func articleHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	article, err := fetchReadableWithFallback(rawURL)
+	article, err := fetchReadable(rawURL)
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusBadGateway)
 		return
