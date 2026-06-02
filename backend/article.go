@@ -223,6 +223,10 @@ func fetchReadable(rawURL string) (readability.Article, error) {
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return readability.Article{}, fmt.Errorf("HTTP %d fetching %s", resp.StatusCode, rawURL)
+	}
+
 	parsedURL, _ := url.Parse(rawURL)
 	return readability.FromReader(resp.Body, parsedURL)
 }
