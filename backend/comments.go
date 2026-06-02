@@ -55,7 +55,7 @@ type lobstersComment struct {
 	IsDeleted      bool            `json:"is_deleted"`
 	IsModerated    bool            `json:"is_moderated"`
 	Comment        string          `json:"comment"`
-	IndentLevel    int             `json:"indent_level"`
+	ParentComment  string          `json:"parent_comment"`
 	CommentingUser json.RawMessage `json:"commenting_user"`
 }
 
@@ -418,25 +418,20 @@ func lobstersJSONURL(rawURL string) (string, error) {
 }
 
 func buildLobstersTree(comments []lobstersComment) []*lobstersNode {
-	type entry struct {
-		node  *lobstersNode
-		level int
+	nodes := make(map[string]*lobstersNode, len(comments))
+	for i := range comments {
+		nodes[comments[i].ShortID] = &lobstersNode{comment: comments[i]}
 	}
 	var roots []*lobstersNode
-	var stack []entry
 	for i := range comments {
-		node := &lobstersNode{comment: comments[i]}
-		level := comments[i].IndentLevel
-		for len(stack) > 0 && stack[len(stack)-1].level >= level {
-			stack = stack[:len(stack)-1]
-		}
-		if len(stack) == 0 {
+		node := nodes[comments[i].ShortID]
+		if comments[i].ParentComment == "" {
 			roots = append(roots, node)
+		} else if parent, ok := nodes[comments[i].ParentComment]; ok {
+			parent.children = append(parent.children, node)
 		} else {
-			p := stack[len(stack)-1].node
-			p.children = append(p.children, node)
+			roots = append(roots, node)
 		}
-		stack = append(stack, entry{node, level})
 	}
 	return roots
 }
