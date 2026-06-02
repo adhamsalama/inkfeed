@@ -3,7 +3,28 @@ package main
 import (
 	"fmt"
 	"net/http"
+	"time"
 )
+
+type ScrapingClientConfig struct {
+	Timeout       time.Duration
+	WithProxy     bool
+	UseProxyFirst bool
+}
+
+func newScrapingClient(cfg ScrapingClientConfig) *ScrapingYoungLad {
+	ua := userAgent
+	var proxyURL *string
+	if cfg.WithProxy && feedProxyURL != "" {
+		proxyURL = &feedProxyURL
+	}
+	return &ScrapingYoungLad{
+		Client:        &http.Client{Timeout: cfg.Timeout},
+		ProxyURL:      proxyURL,
+		UseProxyFirst: cfg.UseProxyFirst,
+		UserAgent:     &ua,
+	}
+}
 
 type ScrapingYoungLad struct {
 	Client        *http.Client

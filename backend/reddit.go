@@ -21,14 +21,12 @@ func redditPostHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	client := &http.Client{Timeout: 15 * time.Second}
+	client := newScrapingClient(ScrapingClientConfig{Timeout: 15 * time.Second})
 	req, err := http.NewRequest("GET", rawURL, nil)
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	req.Header.Set("User-Agent", userAgent)
-
 	resp, err := client.Do(req)
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusBadGateway)

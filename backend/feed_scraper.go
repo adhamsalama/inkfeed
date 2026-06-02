@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log"
 	"net/http"
 	neturl "net/url"
@@ -163,36 +162,14 @@ func contentArchiverTimeout() time.Duration {
 // fetchReadableBackground fetches an article with a short timeout, falling
 // back to the proxy on error — suitable for best-effort background archiving.
 func fetchReadableBackground(rawURL string) (readability.Article, error) {
-	client := &http.Client{Timeout: contentArchiverTimeout()}
+	client := newScrapingClient(ScrapingClientConfig{Timeout: contentArchiverTimeout(), WithProxy: true})
 	req, err := http.NewRequest("GET", rawURL, nil)
 	if err != nil {
 		return readability.Article{}, err
 	}
-	req.Header.Set("User-Agent", userAgent)
 	resp, err := client.Do(req)
-	if err != nil || (resp != nil && (resp.StatusCode < 200 || resp.StatusCode >= 300)) {
-		if resp != nil {
-			resp.Body.Close()
-		}
-		if feedProxyURL == "" {
-			if err != nil {
-				return readability.Article{}, err
-			}
-			return readability.Article{}, fmt.Errorf("HTTP %d fetching %s", resp.StatusCode, rawURL)
-		}
-		proxyReq, perr := http.NewRequest("GET", feedProxyURL+"?url="+rawURL, nil)
-		if perr != nil {
-			return readability.Article{}, perr
-		}
-		proxyReq.Header.Set("User-Agent", userAgent)
-		resp, err = client.Do(proxyReq)
-		if err != nil {
-			return readability.Article{}, err
-		}
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			resp.Body.Close()
-			return readability.Article{}, fmt.Errorf("HTTP %d fetching %s via proxy", resp.StatusCode, rawURL)
-		}
+	if err != nil {
+		return readability.Article{}, err
 	}
 	defer resp.Body.Close()
 	parsedURL, _ := neturl.Parse(rawURL)

@@ -196,12 +196,11 @@ func fetchHNComments(rawURL string) (string, error) {
 	}
 
 	algoliaURL := "https://hn.algolia.com/api/v1/items/" + itemID
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := newScrapingClient(ScrapingClientConfig{Timeout: 30 * time.Second})
 	hnReq, err := http.NewRequest("GET", algoliaURL, nil)
 	if err != nil {
 		return "", err
 	}
-	hnReq.Header.Set("User-Agent", userAgent)
 	resp, err := client.Do(hnReq)
 	if err != nil {
 		return "", err
@@ -286,13 +285,11 @@ func renderHNComment(sb *strings.Builder, item hnItem, depth int, counter *int, 
 // ── Reddit ───────────────────────────────────────────────────────────────────
 
 func fetchRedditComments(rawURL string) (string, error) {
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := newScrapingClient(ScrapingClientConfig{Timeout: 30 * time.Second})
 	req, err := http.NewRequest("GET", rawURL, nil)
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("User-Agent", userAgent)
-
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
@@ -303,12 +300,12 @@ func fetchRedditComments(rawURL string) (string, error) {
 	var listings []redditListing
 	if err := json.NewDecoder(resp.Body).Decode(&listings); err != nil {
 		log.Printf("reddit direct fetch failed for %s: %v, retrying via proxy", rawURL, err)
-		proxyReq, err := http.NewRequest("GET", feedProxyURL+"?url="+rawURL, nil)
+		proxyClient := newScrapingClient(ScrapingClientConfig{Timeout: 30 * time.Second, WithProxy: true, UseProxyFirst: true})
+		proxyReq, err := http.NewRequest("GET", rawURL, nil)
 		if err != nil {
 			return "", err
 		}
-		proxyReq.Header.Set("User-Agent", userAgent)
-		proxyResp, err := client.Do(proxyReq)
+		proxyResp, err := proxyClient.Do(proxyReq)
 		if err != nil {
 			return "", err
 		}
@@ -493,13 +490,11 @@ func fetchLobsteComments(rawURL string) (string, error) {
 		return "", err
 	}
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := newScrapingClient(ScrapingClientConfig{Timeout: 30 * time.Second})
 	req, err := http.NewRequest("GET", jsonURL, nil)
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("User-Agent", userAgent)
-
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
