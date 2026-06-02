@@ -133,21 +133,21 @@ var CommentsViewer = {
                 };
 
                 var buildLobstersTree = function(comments) {
+                    var nodes = {};
+                    for (var i = 0; i < comments.length; i++) {
+                        nodes[comments[i].short_id] = { comment: comments[i], children: [] };
+                    }
                     var roots = [];
-                    var stack = [];
                     for (var i = 0; i < comments.length; i++) {
                         var c = comments[i];
-                        var node = { comment: c, children: [] };
-                        var level = c.indent_level || 1;
-                        while (stack.length > 0 && stack[stack.length - 1].level >= level) {
-                            stack.pop();
-                        }
-                        if (stack.length === 0) {
+                        var node = nodes[c.short_id];
+                        if (!c.parent_comment) {
                             roots.push(node);
+                        } else if (nodes[c.parent_comment]) {
+                            nodes[c.parent_comment].children.push(node);
                         } else {
-                            stack[stack.length - 1].node.children.push(node);
+                            roots.push(node);
                         }
-                        stack.push({ node: node, level: level });
                     }
                     return roots;
                 };
@@ -159,7 +159,7 @@ var CommentsViewer = {
                     var collapseId = "lob-c-" + n;
                     var author = "[deleted]";
                     if (!c.is_deleted && !c.is_moderated && c.commenting_user) {
-                        author = c.commenting_user.username || "[deleted]";
+                        author = (typeof c.commenting_user === "string" ? c.commenting_user : c.commenting_user.username) || "[deleted]";
                     }
                     var dateStr = c.created_at ? c.created_at.substring(0, 10) : "";
                     var toggleIcon = collapsed ? "[+]" : "[&minus;]";
