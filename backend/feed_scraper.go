@@ -162,7 +162,7 @@ func contentArchiverTimeout() time.Duration {
 // fetchReadableBackground fetches an article with a short timeout, falling
 // back to the proxy on error — suitable for best-effort background archiving.
 func fetchReadableBackground(rawURL string) (readability.Article, error) {
-	client := newScrapingClient(ScrapingClientConfig{Timeout: contentArchiverTimeout(), WithProxy: true, UseProxyFirst: true})
+	client := newScrappingClient(ScrappingClientConfig{Timeout: contentArchiverTimeout(), WithProxy: true, UseProxyFirst: true})
 	req, err := http.NewRequest("GET", rawURL, nil)
 	if err != nil {
 		return readability.Article{}, err

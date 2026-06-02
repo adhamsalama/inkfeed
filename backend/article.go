@@ -210,7 +210,7 @@ func articleMetaHTML(article readability.Article) string {
 
 // fetchReadable fetches a URL and runs Mozilla Readability on the response.
 func fetchReadable(rawURL string) (readability.Article, error) {
-	client := newScrapingClient(ScrapingClientConfig{Timeout: 30 * time.Second, WithProxy: true, UseProxyFirst: true})
+	client := newScrappingClient(ScrappingClientConfig{Timeout: 30 * time.Second, WithProxy: true, UseProxyFirst: true})
 	req, err := http.NewRequest("GET", rawURL, nil)
 	if err != nil {
 		return readability.Article{}, err

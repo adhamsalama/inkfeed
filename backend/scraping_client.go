@@ -6,19 +6,19 @@ import (
 	"time"
 )
 
-type ScrapingClientConfig struct {
+type ScrappingClientConfig struct {
 	Timeout       time.Duration
 	WithProxy     bool
 	UseProxyFirst bool
 }
 
-func newScrapingClient(cfg ScrapingClientConfig) *ScrapingYoungLad {
+func newScrappingClient(cfg ScrappingClientConfig) *ScrappingYoungLad {
 	ua := userAgent
 	var proxyURL *string
 	if cfg.WithProxy && feedProxyURL != "" {
 		proxyURL = &feedProxyURL
 	}
-	return &ScrapingYoungLad{
+	return &ScrappingYoungLad{
 		Client:        &http.Client{Timeout: cfg.Timeout},
 		ProxyURL:      proxyURL,
 		UseProxyFirst: cfg.UseProxyFirst,
@@ -26,19 +26,19 @@ func newScrapingClient(cfg ScrapingClientConfig) *ScrapingYoungLad {
 	}
 }
 
-type ScrapingYoungLad struct {
+type ScrappingYoungLad struct {
 	Client        *http.Client
 	ProxyURL      *string
 	UseProxyFirst bool
 	UserAgent     *string
 }
 
-func (c *ScrapingYoungLad) doDirectRequest(req *http.Request) (*http.Response, error) {
+func (c *ScrappingYoungLad) doDirectRequest(req *http.Request) (*http.Response, error) {
 	fmt.Printf("attempting direct request to %s\n", req.URL.String())
 	return c.Client.Do(req)
 }
 
-func (c *ScrapingYoungLad) doProxyRequest(req *http.Request) (*http.Response, error) {
+func (c *ScrappingYoungLad) doProxyRequest(req *http.Request) (*http.Response, error) {
 	proxyReq, err := http.NewRequest(req.Method, *c.ProxyURL+"?url="+req.URL.String(), req.Body)
 	if err != nil {
 		fmt.Printf("failed to create proxy request for %s: %v\n", req.URL.String(), err)
@@ -49,18 +49,18 @@ func (c *ScrapingYoungLad) doProxyRequest(req *http.Request) (*http.Response, er
 	return c.Client.Do(proxyReq)
 }
 
-func (c *ScrapingYoungLad) generateDirectAndProxyError(directErr, proxyErr error) error {
+func (c *ScrappingYoungLad) generateDirectAndProxyError(directErr, proxyErr error) error {
 	return fmt.Errorf("both direct and proxy requests failed: direct error: %v, proxy error: %v", directErr, proxyErr)
 }
 
-func (c *ScrapingYoungLad) isSuccessfulResponse(resp *http.Response, err error) bool {
+func (c *ScrappingYoungLad) isSuccessfulResponse(resp *http.Response, err error) bool {
 	if err != nil || resp == nil {
 		return false
 	}
 	return resp.StatusCode >= 200 && resp.StatusCode < 300
 }
 
-func (c *ScrapingYoungLad) Do(req *http.Request) (*http.Response, error) {
+func (c *ScrappingYoungLad) Do(req *http.Request) (*http.Response, error) {
 	if c.UserAgent != nil {
 		req.Header.Set("User-Agent", *c.UserAgent)
 	}

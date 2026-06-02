@@ -195,7 +195,7 @@ func fetchHNComments(rawURL string) (string, error) {
 	}
 
 	algoliaURL := "https://hn.algolia.com/api/v1/items/" + itemID
-	client := newScrapingClient(ScrapingClientConfig{Timeout: 30 * time.Second, WithProxy: true, UseProxyFirst: true})
+	client := newScrappingClient(ScrappingClientConfig{Timeout: 30 * time.Second, WithProxy: true, UseProxyFirst: true})
 	hnReq, err := http.NewRequest("GET", algoliaURL, nil)
 	if err != nil {
 		return "", err
@@ -284,7 +284,7 @@ func renderHNComment(sb *strings.Builder, item hnItem, depth int, counter *int, 
 // ── Reddit ───────────────────────────────────────────────────────────────────
 
 func fetchRedditComments(rawURL string) (string, error) {
-	client := newScrapingClient(ScrapingClientConfig{Timeout: 30 * time.Second, WithProxy: true, UseProxyFirst: true})
+	client := newScrappingClient(ScrappingClientConfig{Timeout: 30 * time.Second, WithProxy: true, UseProxyFirst: true})
 	req, err := http.NewRequest("GET", rawURL, nil)
 	if err != nil {
 		return "", err
@@ -476,7 +476,7 @@ func fetchLobsteComments(rawURL string) (string, error) {
 		return "", err
 	}
 
-	client := newScrapingClient(ScrapingClientConfig{Timeout: 30 * time.Second, WithProxy: true, UseProxyFirst: true})
+	client := newScrappingClient(ScrappingClientConfig{Timeout: 30 * time.Second, WithProxy: true, UseProxyFirst: true})
 	req, err := http.NewRequest("GET", jsonURL, nil)
 	if err != nil {
 		return "", err
