@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"html"
 	"io"
-	"log"
 	"net/http"
 	"regexp"
 	"strings"
@@ -196,7 +195,7 @@ func fetchHNComments(rawURL string) (string, error) {
 	}
 
 	algoliaURL := "https://hn.algolia.com/api/v1/items/" + itemID
-	client := newScrapingClient(ScrapingClientConfig{Timeout: 30 * time.Second})
+	client := newScrapingClient(ScrapingClientConfig{Timeout: 30 * time.Second, WithProxy: true, UseProxyFirst: true})
 	hnReq, err := http.NewRequest("GET", algoliaURL, nil)
 	if err != nil {
 		return "", err
@@ -285,7 +284,7 @@ func renderHNComment(sb *strings.Builder, item hnItem, depth int, counter *int, 
 // ── Reddit ───────────────────────────────────────────────────────────────────
 
 func fetchRedditComments(rawURL string) (string, error) {
-	client := newScrapingClient(ScrapingClientConfig{Timeout: 30 * time.Second})
+	client := newScrapingClient(ScrapingClientConfig{Timeout: 30 * time.Second, WithProxy: true, UseProxyFirst: true})
 	req, err := http.NewRequest("GET", rawURL, nil)
 	if err != nil {
 		return "", err
@@ -299,20 +298,7 @@ func fetchRedditComments(rawURL string) (string, error) {
 	// Reddit returns [postListing, commentsListing]
 	var listings []redditListing
 	if err := json.NewDecoder(resp.Body).Decode(&listings); err != nil {
-		log.Printf("reddit direct fetch failed for %s: %v, retrying via proxy", rawURL, err)
-		proxyClient := newScrapingClient(ScrapingClientConfig{Timeout: 30 * time.Second, WithProxy: true, UseProxyFirst: true})
-		proxyReq, err := http.NewRequest("GET", rawURL, nil)
-		if err != nil {
-			return "", err
-		}
-		proxyResp, err := proxyClient.Do(proxyReq)
-		if err != nil {
-			return "", err
-		}
-		defer proxyResp.Body.Close()
-		if err := json.NewDecoder(proxyResp.Body).Decode(&listings); err != nil {
-			return "", fmt.Errorf("failed to parse Reddit JSON: %w", err)
-		}
+		return "", fmt.Errorf("failed to parse Reddit JSON: %w", err)
 	}
 	if len(listings) < 2 {
 		return "", fmt.Errorf("unexpected Reddit response format")
@@ -490,7 +476,7 @@ func fetchLobsteComments(rawURL string) (string, error) {
 		return "", err
 	}
 
-	client := newScrapingClient(ScrapingClientConfig{Timeout: 30 * time.Second})
+	client := newScrapingClient(ScrapingClientConfig{Timeout: 30 * time.Second, WithProxy: true, UseProxyFirst: true})
 	req, err := http.NewRequest("GET", jsonURL, nil)
 	if err != nil {
 		return "", err

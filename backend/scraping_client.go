@@ -34,15 +34,18 @@ type ScrapingYoungLad struct {
 }
 
 func (c *ScrapingYoungLad) doDirectRequest(req *http.Request) (*http.Response, error) {
+	fmt.Printf("attempting direct request to %s\n", req.URL.String())
 	return c.Client.Do(req)
 }
 
 func (c *ScrapingYoungLad) doProxyRequest(req *http.Request) (*http.Response, error) {
 	proxyReq, err := http.NewRequest(req.Method, *c.ProxyURL+"?url="+req.URL.String(), req.Body)
 	if err != nil {
+		fmt.Printf("failed to create proxy request for %s: %v\n", req.URL.String(), err)
 		return nil, err
 	}
 	proxyReq.Header = req.Header.Clone()
+	fmt.Printf("attempting proxy request to %s via %s\n", req.URL.String(), *c.ProxyURL)
 	return c.Client.Do(proxyReq)
 }
 

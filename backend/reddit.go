@@ -21,7 +21,7 @@ func redditPostHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	client := newScrapingClient(ScrapingClientConfig{Timeout: 15 * time.Second})
+	client := newScrapingClient(ScrapingClientConfig{Timeout: 15 * time.Second, WithProxy: true, UseProxyFirst: true})
 	req, err := http.NewRequest("GET", rawURL, nil)
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusBadRequest)
