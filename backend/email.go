@@ -300,7 +300,7 @@ func emailHandler(w http.ResponseWriter, r *http.Request) {
 			}
 			msg.HTMLContent = "<p>" + html.EscapeString(title) + "</p>"
 			msg.Attachments = []EmailAttachment{{
-				Filename: sanitizeFilename(title) + ".mobi",
+				Filename: sanitizeFilename(title) + "_" + time.Now().Format("2006-01-02") + ".mobi",
 				Content:  data,
 				MimeType: "application/x-mobipocket-ebook",
 			}}
@@ -313,7 +313,7 @@ func emailHandler(w http.ResponseWriter, r *http.Request) {
 			}
 			msg.HTMLContent = "<p>" + html.EscapeString(title) + "</p>"
 			msg.Attachments = []EmailAttachment{{
-				Filename: sanitizeFilename(title) + ".epub",
+				Filename: sanitizeFilename(title) + "_" + time.Now().Format("2006-01-02") + ".epub",
 				Content:  data,
 				MimeType: "application/epub+zip",
 			}}

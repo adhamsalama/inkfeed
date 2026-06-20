@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/adhamsalama/inkfeed-backend/mobi"
 )
@@ -158,7 +159,12 @@ func mobiHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	filename := sanitizeFilename(req.Title) + ".mobi"
+	var filename string
+	if len(req.URLs) > 0 {
+		filename = sanitizeFilename(req.Title) + "_" + time.Now().Format("2006-01-02") + ".mobi"
+	} else {
+		filename = sanitizeFilename(req.Title) + ".mobi"
+	}
 	w.Header().Set("Content-Type", "application/x-mobipocket-ebook")
 	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
 	w.Write(data)

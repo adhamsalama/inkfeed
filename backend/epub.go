@@ -17,6 +17,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	epub "github.com/go-shiori/go-epub"
 )
@@ -76,7 +77,12 @@ func epubHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	filename := sanitizeFilename(req.Title) + ".epub"
+	var filename string
+	if len(req.URLs) > 0 {
+		filename = sanitizeFilename(req.Title) + "_" + time.Now().Format("2006-01-02") + ".epub"
+	} else {
+		filename = sanitizeFilename(req.Title) + ".epub"
+	}
 	w.Header().Set("Content-Type", "application/epub+zip")
 	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
 	w.Write(data)

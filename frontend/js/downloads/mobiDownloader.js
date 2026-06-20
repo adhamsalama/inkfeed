@@ -172,7 +172,9 @@ var MobiDownloader = {
     emailSelectedArticles: function(selectedArticles, to, callback) {
         try {
             var feedTitle = getText(document.getElementById("feed-title")) || "Articles";
-            var filename = feedTitle.replace(/[^a-z0-9]/gi, "_") + "_articles.mobi";
+            var _d = new Date(), _m = _d.getMonth() + 1, _day = _d.getDate();
+            var _dateStr = _d.getFullYear() + "-" + (_m < 10 ? "0" + _m : _m) + "-" + (_day < 10 ? "0" + _day : _day);
+            var filename = feedTitle.replace(/[^a-z0-9]/gi, "_") + "_articles_" + _dateStr + ".mobi";
             var progressEl = document.getElementById("download-all-progress");
             removeClass(progressEl, "hidden");
             setText(progressEl, "Preparing articles for email: 0/" + selectedArticles.length);
@@ -250,7 +252,9 @@ var MobiDownloader = {
     downloadSelectedArticles: function(selectedArticles) {
         try {
             var feedTitle = getText(document.getElementById("feed-title"));
-            var filename = feedTitle.replace(/[^a-z0-9]/gi, "_") + "_selected_articles.mobi";
+            var _d = new Date(), _m = _d.getMonth() + 1, _day = _d.getDate();
+            var _dateStr = _d.getFullYear() + "-" + (_m < 10 ? "0" + _m : _m) + "-" + (_day < 10 ? "0" + _day : _day);
+            var filename = feedTitle.replace(/[^a-z0-9]/gi, "_") + "_selected_articles_" + _dateStr + ".mobi";
 
             if (AppConfig.USE_BACKEND) {
                 var urls = [];
