@@ -96,6 +96,18 @@ var ArticleSelectionManager = {
         setText(document.getElementById("selection-count"), ArticleSelectionState.selectedIndices.size);
     },
 
+    // Select all visible articles
+    selectAllArticles: function() {
+        var articleList = document.getElementById("article-list");
+        var items = articleList.getElementsByClassName("article-item");
+        for (var i = 0; i < items.length; i++) {
+            ArticleSelectionState.selectedIndices.add(i);
+            addClass(items[i], "selected");
+            removeClass(items[i], "skipped");
+        }
+        this.updateSelectionCounter();
+    },
+
     // Cancel article selection
     cancelArticleSelection: function() {
         // Remove selection buttons from all articles
@@ -180,4 +192,8 @@ function downloadSelectedArticles() {
 
 function cancelArticleSelection() {
     ArticleSelectionManager.cancelArticleSelection();
+}
+
+function selectAllArticles() {
+    ArticleSelectionManager.selectAllArticles();
 }
