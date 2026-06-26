@@ -43,7 +43,6 @@ func textHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(article.TextContent))
 }
 
-
 func articleHandler(w http.ResponseWriter, r *http.Request) {
 	rawURL := r.URL.Query().Get("url")
 	if rawURL == "" {
