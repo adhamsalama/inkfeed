@@ -117,7 +117,7 @@ var ArticleSelectionManager = {
         ArticleSelectionState.inSelectionMode = false;
 
         // Show normal buttons, hide selection buttons
-        document.getElementById("normal-nav-buttons").style.display = "flex";
+        document.getElementById("normal-nav-buttons").style.display = "";
         document.getElementById("selection-nav-buttons").style.display = "none";
     },
 
