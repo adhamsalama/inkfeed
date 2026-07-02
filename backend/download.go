@@ -62,6 +62,7 @@ func parseSrcset(srcset string) string {
 // Handles absolute HTTP URLs, protocol-relative URLs (//), data URIs, and srcset.
 func downloadAndEmbedMobiImages(bodyHTML string) (string, [][]byte) {
 	urlToIdx := map[string]int{}
+	variantSeen := map[string]bool{}
 	var imageRecords [][]byte
 
 	isHTTPURL := func(u string) bool {
@@ -99,6 +100,17 @@ func downloadAndEmbedMobiImages(bodyHTML string) (string, [][]byte) {
 
 		if idx, ok := urlToIdx[useURL]; ok {
 			return mobiImgTag(imgTag, idx)
+		}
+
+		// Drop responsive duplicates: sites (e.g. Quanta) ship separate
+		// "Desktop" and "Mobile" variants of the same figure that CSS media
+		// queries would hide, but without CSS both would render. Keep the first
+		// variant seen and drop the rest.
+		if key := responsiveVariantKey(useURL); key != "" {
+			if variantSeen[key] {
+				return ""
+			}
+			variantSeen[key] = true
 		}
 
 		var data []byte
@@ -189,6 +201,18 @@ func downloadAndEmbedMobiImages(bodyHTML string) (string, [][]byte) {
 	})
 
 	return result, imageRecords
+}
+
+// responsiveVariantKey returns a normalized key identifying a responsive image
+// variant, or "" if the URL carries no responsive marker (so it never
+// participates in dedup). It strips the "desktop"/"mobile" tokens so the two
+// variants of the same figure collapse to the same key.
+func responsiveVariantKey(u string) string {
+	lower := strings.ToLower(u)
+	if !strings.Contains(lower, "desktop") && !strings.Contains(lower, "mobile") {
+		return ""
+	}
+	return strings.NewReplacer("desktop", "", "mobile", "").Replace(lower)
 }
 
 // mobiImgTag returns an <img> tag with recindex="N" (preserving alt if present).
