@@ -134,6 +134,14 @@ func downloadAndEmbedMobiImages(bodyHTML string) (string, [][]byte) {
 			ct = strings.TrimSpace(ct[:i])
 		}
 
+		// Skip formats that are not valid Kindle image records (e.g. SVG,
+		// which is detected as text/xml). Embedding them corrupts the image
+		// record stream and breaks resolution of the valid images that follow.
+		if ct == "image/svg+xml" || !strings.HasPrefix(ct, "image/") {
+			log.Printf("mobi: skipping unsupported image type %s: %s", ct, useURL)
+			return imgTag
+		}
+
 		// Convert WebP to JPEG; Kindle does not support WebP. compressImage
 		// relies on golang.org/x/image/webp, which only decodes bare VP8/VP8L
 		// and rejects the extended VP8X container that WordPress sites (e.g.
