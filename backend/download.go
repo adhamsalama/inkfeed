@@ -19,6 +19,8 @@ import (
 	"time"
 
 	"github.com/adhamsalama/inkfeed-backend/mobi"
+	"github.com/srwiley/oksvg"
+	"github.com/srwiley/rasterx"
 	"github.com/vincent-petithory/dataurl"
 	"golang.org/x/image/vp8"
 	"golang.org/x/image/vp8l"
@@ -134,10 +136,20 @@ func downloadAndEmbedMobiImages(bodyHTML string) (string, [][]byte) {
 			ct = strings.TrimSpace(ct[:i])
 		}
 
-		// Skip formats that are not valid Kindle image records (e.g. SVG,
-		// which is detected as text/xml). Embedding them corrupts the image
-		// record stream and breaks resolution of the valid images that follow.
-		if ct == "image/svg+xml" || !strings.HasPrefix(ct, "image/") {
+		// Rasterize SVG to JPEG; Kindle cannot render SVG image records, and
+		// embedding one verbatim corrupts the image record stream. SVG is
+		// detected as text/xml by http.DetectContentType, so sniff the bytes.
+		if ct == "image/svg+xml" || isSVG(data) {
+			jpg, err := svgToJPEG(data, imageQuality())
+			if err != nil {
+				log.Printf("mobi: failed to rasterize SVG %s: %v", useURL, err)
+				return imgTag
+			}
+			data = jpg
+			ct = "image/jpeg"
+		} else if !strings.HasPrefix(ct, "image/") {
+			// Anything else that isn't an image is not a valid Kindle image
+			// record; embedding it breaks resolution of the images that follow.
 			log.Printf("mobi: skipping unsupported image type %s: %s", ct, useURL)
 			return imgTag
 		}
@@ -243,6 +255,48 @@ func pngToJPEG(data []byte, quality int) ([]byte, error) {
 	rgba := image.NewRGBA(b)
 	draw.Draw(rgba, b, image.NewUniform(color.White), image.Point{}, draw.Src)
 	draw.Draw(rgba, b, src, b.Min, draw.Over)
+
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, rgba, &jpeg.Options{Quality: quality}); err != nil {
+		return nil, err
+	}
+	return insertJFIFHeader(buf.Bytes()), nil
+}
+
+// isSVG reports whether data looks like an SVG document. http.DetectContentType
+// classifies SVG as text/xml or text/plain, so sniff for an <svg element near
+// the start (after an optional XML declaration / comments / doctype).
+func isSVG(data []byte) bool {
+	head := data
+	if len(head) > 1024 {
+		head = head[:1024]
+	}
+	return bytes.Contains(bytes.ToLower(head), []byte("<svg"))
+}
+
+// svgToJPEG rasterizes an SVG (at its intrinsic viewBox size, default 800x600)
+// onto a white background and encodes it as JPEG with a JFIF APP0 header so
+// Kindle renders it inline.
+func svgToJPEG(data []byte, quality int) ([]byte, error) {
+	icon, err := oksvg.ReadIconStream(bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	w := int(icon.ViewBox.W)
+	h := int(icon.ViewBox.H)
+	if w <= 0 {
+		w = 800
+	}
+	if h <= 0 {
+		h = 600
+	}
+	rgba := image.NewRGBA(image.Rect(0, 0, w, h))
+	draw.Draw(rgba, rgba.Bounds(), image.NewUniform(color.White), image.Point{}, draw.Src)
+
+	icon.SetTarget(0, 0, float64(w), float64(h))
+	scanner := rasterx.NewScannerGV(w, h, rgba, rgba.Bounds())
+	raster := rasterx.NewDasher(w, h, scanner)
+	icon.Draw(raster, 1.0)
 
 	var buf bytes.Buffer
 	if err := jpeg.Encode(&buf, rgba, &jpeg.Options{Quality: quality}); err != nil {
