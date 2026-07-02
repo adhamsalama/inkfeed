@@ -1,9 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"html"
+	"image"
+	"image/png"
 	"io"
 	"log"
 	"net/http"
@@ -13,6 +16,8 @@ import (
 	"time"
 
 	"github.com/adhamsalama/inkfeed-backend/mobi"
+	"github.com/srwiley/oksvg"
+	"github.com/srwiley/rasterx"
 	"github.com/vincent-petithory/dataurl"
 )
 
@@ -125,18 +130,58 @@ func downloadAndEmbedMobiImages(bodyHTML string) (string, [][]byte) {
 			ct = strings.TrimSpace(ct[:i])
 		}
 
-		// Convert WebP to JPEG; Kindle does not support WebP.
-		if ct == "image/webp" {
+		switch ct {
+		case "image/jpeg", "image/png", "image/gif":
+			// embed as-is
+		case "image/webp":
+			// Kindle does not support WebP; convert to JPEG.
 			data, _ = compressImage(data, ct, imageQuality())
+		case "text/xml", "image/svg+xml":
+			// Kindle does not support SVG; rasterize to PNG.
+			png, err := svgToPNG(data)
+			if err != nil {
+				log.Printf("mobi: failed to rasterize SVG %s: %v", useURL, err)
+				return imgTag
+			}
+			data = png
+		default:
+			log.Printf("mobi: skipping unsupported image type %s: %s", ct, useURL)
+			return imgTag
 		}
 
-		idx := len(imageRecords) + 1
+		idx := len(imageRecords)
 		urlToIdx[useURL] = idx
 		imageRecords = append(imageRecords, data)
 		return mobiImgTag(imgTag, idx)
 	})
 
 	return result, imageRecords
+}
+
+// svgToPNG rasterizes SVG data to a PNG at the SVG's intrinsic size (default 800×600 if unspecified).
+func svgToPNG(data []byte) ([]byte, error) {
+	icon, err := oksvg.ReadIconStream(bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	w := int(icon.ViewBox.W)
+	h := int(icon.ViewBox.H)
+	if w <= 0 {
+		w = 800
+	}
+	if h <= 0 {
+		h = 600
+	}
+	icon.SetTarget(0, 0, float64(w), float64(h))
+	rgba := image.NewRGBA(image.Rect(0, 0, w, h))
+	scanner := rasterx.NewScannerGV(w, h, rgba, rgba.Bounds())
+	raster := rasterx.NewDasher(w, h, scanner)
+	icon.Draw(raster, 1.0)
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, rgba); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
 
 // mobiImgTag returns an <img> tag with recindex="N" (preserving alt if present).
