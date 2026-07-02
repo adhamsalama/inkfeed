@@ -1,9 +1,15 @@
 package main
 
 import (
+	"bytes"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"html"
+	"image"
+	"image/color"
+	"image/draw"
+	"image/jpeg"
 	"io"
 	"log"
 	"net/http"
@@ -14,6 +20,9 @@ import (
 
 	"github.com/adhamsalama/inkfeed-backend/mobi"
 	"github.com/vincent-petithory/dataurl"
+	"golang.org/x/image/vp8"
+	"golang.org/x/image/vp8l"
+	"golang.org/x/image/webp"
 )
 
 type MobiRequest struct {
@@ -125,9 +134,19 @@ func downloadAndEmbedMobiImages(bodyHTML string) (string, [][]byte) {
 			ct = strings.TrimSpace(ct[:i])
 		}
 
-		// Convert WebP to JPEG; Kindle does not support WebP.
+		// Convert WebP to JPEG; Kindle does not support WebP. compressImage
+		// relies on golang.org/x/image/webp, which only decodes bare VP8/VP8L
+		// and rejects the extended VP8X container that WordPress sites (e.g.
+		// Quanta) serve, so use webpToJPEG which handles VP8X too. If the
+		// conversion fails, drop the image rather than embedding a WebP the
+		// Kindle renderer cannot display.
 		if ct == "image/webp" {
-			data, _ = compressImage(data, ct, imageQuality())
+			jpg, err := webpToJPEG(data, imageQuality())
+			if err != nil {
+				log.Printf("mobi: failed to convert WebP %s: %v", useURL, err)
+				return imgTag
+			}
+			data = jpg
 		}
 
 		idx := len(imageRecords) + 1
@@ -146,6 +165,69 @@ func mobiImgTag(original string, recindex int) string {
 		alt = fmt.Sprintf(` alt="%s"`, m[1])
 	}
 	return fmt.Sprintf(`<img%s recindex="%d">`, alt, recindex)
+}
+
+// webpToJPEG decodes a WebP image (including the extended VP8X container) and
+// re-encodes it as JPEG at the given quality. Any alpha channel is composited
+// over white so transparent regions don't render as black on e-ink screens.
+func webpToJPEG(data []byte, quality int) ([]byte, error) {
+	src, err := decodeWebP(data)
+	if err != nil {
+		return nil, err
+	}
+	b := src.Bounds()
+	rgba := image.NewRGBA(b)
+	draw.Draw(rgba, b, image.NewUniform(color.White), image.Point{}, draw.Src)
+	draw.Draw(rgba, b, src, b.Min, draw.Over)
+
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, rgba, &jpeg.Options{Quality: quality}); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+// decodeWebP decodes a WebP image. It first tries the simple-format decoder in
+// golang.org/x/image/webp; if that fails (e.g. an extended VP8X container, which
+// that package does not support), it walks the RIFF chunks itself and decodes
+// the inner VP8L (lossless) or VP8 (lossy) bitstream directly.
+func decodeWebP(data []byte) (image.Image, error) {
+	if img, err := webp.Decode(bytes.NewReader(data)); err == nil {
+		return img, nil
+	}
+
+	if len(data) < 12 || string(data[0:4]) != "RIFF" || string(data[8:12]) != "WEBP" {
+		return nil, fmt.Errorf("webp: not a RIFF/WEBP container")
+	}
+
+	// Each RIFF chunk is a 4-byte FourCC + 4-byte little-endian size + payload,
+	// padded to an even byte boundary.
+	p := 12
+	for p+8 <= len(data) {
+		fourcc := string(data[p : p+4])
+		size := int(binary.LittleEndian.Uint32(data[p+4 : p+8]))
+		start := p + 8
+		if start+size > len(data) {
+			break
+		}
+		payload := data[start : start+size]
+		switch fourcc {
+		case "VP8L":
+			return vp8l.Decode(bytes.NewReader(payload))
+		case "VP8 ":
+			d := vp8.NewDecoder()
+			d.Init(bytes.NewReader(payload), len(payload))
+			if _, err := d.DecodeFrameHeader(); err != nil {
+				return nil, err
+			}
+			return d.DecodeFrame()
+		}
+		p = start + size
+		if size%2 == 1 {
+			p++ // skip pad byte
+		}
+	}
+	return nil, fmt.Errorf("webp: no VP8/VP8L chunk found")
 }
 
 var unsafeCharsRe = regexp.MustCompile(`[^a-zA-Z0-9 ]+`)
