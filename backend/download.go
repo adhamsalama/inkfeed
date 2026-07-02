@@ -157,6 +157,19 @@ func downloadAndEmbedMobiImages(bodyHTML string) (string, [][]byte) {
 			data = jpg
 		}
 
+		// Convert PNG to JPEG; the KF7 MOBI inline image renderer does not
+		// display PNG (it only shows as a cover), so re-encode to JPEG. If the
+		// conversion fails, drop the image rather than embedding a PNG that
+		// won't render inline.
+		if ct == "image/png" {
+			jpg, err := pngToJPEG(data, imageQuality())
+			if err != nil {
+				log.Printf("mobi: failed to convert PNG %s: %v", useURL, err)
+				return imgTag
+			}
+			data = jpg
+		}
+
 		idx := len(imageRecords) + 1
 		urlToIdx[useURL] = idx
 		imageRecords = append(imageRecords, data)
@@ -215,6 +228,27 @@ func insertJFIFHeader(j []byte) []byte {
 	out = append(out, app0...)
 	out = append(out, j[2:]...)
 	return out
+}
+
+// pngToJPEG decodes a PNG and re-encodes it as JPEG at the given quality. Any
+// alpha channel is composited over white so transparent regions don't render
+// as black on e-ink screens, and a JFIF APP0 header is added so Kindle accepts
+// the result inline.
+func pngToJPEG(data []byte, quality int) ([]byte, error) {
+	src, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	b := src.Bounds()
+	rgba := image.NewRGBA(b)
+	draw.Draw(rgba, b, image.NewUniform(color.White), image.Point{}, draw.Src)
+	draw.Draw(rgba, b, src, b.Min, draw.Over)
+
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, rgba, &jpeg.Options{Quality: quality}); err != nil {
+		return nil, err
+	}
+	return insertJFIFHeader(buf.Bytes()), nil
 }
 
 // decodeWebP decodes a WebP image. It first tries the simple-format decoder in
