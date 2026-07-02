@@ -209,5 +209,34 @@ func fetchReadable(rawURL string) (readability.Article, error) {
 	}
 	defer resp.Body.Close()
 	parsedURL, _ := url.Parse(rawURL)
-	return readability.FromReader(resp.Body, parsedURL)
+	article, err := readability.FromReader(resp.Body, parsedURL)
+	if err != nil {
+		return article, err
+	}
+	article.Content = dedupeResponsiveImages(article.Content)
+	return article, nil
+}
+
+// dedupeResponsiveImages removes duplicate responsive <img> variants (keeping
+// the first) from extracted article HTML. Sites like Quanta ship separate
+// "Desktop" and "Mobile" copies of the same figure that CSS media queries hide;
+// without CSS both would render, so collapse variants that differ only by the
+// desktop/mobile token. Shares responsiveVariantKey with the MOBI image path.
+func dedupeResponsiveImages(htmlContent string) string {
+	seen := map[string]bool{}
+	return mobiImgTagRe.ReplaceAllStringFunc(htmlContent, func(imgTag string) string {
+		m := mobiSrcAttr.FindStringSubmatch(imgTag)
+		if len(m) < 2 {
+			return imgTag
+		}
+		key := responsiveVariantKey(m[1])
+		if key == "" {
+			return imgTag
+		}
+		if seen[key] {
+			return ""
+		}
+		seen[key] = true
+		return imgTag
+	})
 }
