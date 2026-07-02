@@ -192,7 +192,29 @@ func webpToJPEG(data []byte, quality int) ([]byte, error) {
 	if err := jpeg.Encode(&buf, rgba, &jpeg.Options{Quality: quality}); err != nil {
 		return nil, err
 	}
-	return buf.Bytes(), nil
+	return insertJFIFHeader(buf.Bytes()), nil
+}
+
+// insertJFIFHeader inserts a standard JFIF APP0 segment immediately after the
+// SOI marker. Go's image/jpeg encoder omits the APP0 header (it writes SOI
+// straight into a quantization table, FF D8 FF DB), and Kindle's JPEG decoder
+// rejects such images inline. Prepending the APP0 marker yields the FF D8 FF E0
+// framing Kindle expects.
+func insertJFIFHeader(j []byte) []byte {
+	if len(j) < 2 || j[0] != 0xFF || j[1] != 0xD8 {
+		return j // not a JPEG; leave untouched
+	}
+	if len(j) >= 4 && j[2] == 0xFF && j[3] == 0xE0 {
+		return j // already has an APP0 segment
+	}
+	// FF E0, length 16, "JFIF\0", version 1.1, units=0, X/Y density 1, no thumb.
+	app0 := []byte{0xFF, 0xE0, 0x00, 0x10, 'J', 'F', 'I', 'F', 0x00,
+		0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00}
+	out := make([]byte, 0, len(j)+len(app0))
+	out = append(out, j[0], j[1])
+	out = append(out, app0...)
+	out = append(out, j[2:]...)
+	return out
 }
 
 // decodeWebP decodes a WebP image. It first tries the simple-format decoder in
