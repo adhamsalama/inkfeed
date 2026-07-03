@@ -405,11 +405,40 @@ func mobiHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		commentsHTML := fetchCommentsHTML(req.CommentsURL)
 		link := `<p><a href="` + html.EscapeString(req.URL) + `">` + html.EscapeString(req.URL) + `</a></p>`
-		htmlContent = "<html><body><h1>" + html.EscapeString(req.Title) + "</h1>" + link + articleMetaHTML(article) + article.Content
-		if commentsHTML != "" {
-			htmlContent += "<hr/><h2>Comments</h2>" + commentsHTML
+
+		// Build a table of contents from the article's section headings (plus a
+		// Comments entry when present). Only worthwhile when there are at least
+		// two navigation points; otherwise fall back to a plain document.
+		annotated, labels := annotateArticleHeadings(article.Content, 0)
+		hasComments := commentsHTML != ""
+		total := len(labels)
+		if hasComments {
+			total++
 		}
-		htmlContent += "</body></html>"
+
+		var sb strings.Builder
+		sb.WriteString("<html><body><h1>" + html.EscapeString(req.Title) + "</h1>" + link + articleMetaHTML(article))
+		if total >= 2 {
+			sb.WriteString("<h2>Contents</h2><ul>")
+			for _, l := range labels {
+				sb.WriteString(fmt.Sprintf(`<li><a filepos="%s">%s</a></li>`, mobiTOCPlaceholder, html.EscapeString(l)))
+			}
+			if hasComments {
+				sb.WriteString(fmt.Sprintf(`<li><a filepos="%s">Comments</a></li>`, mobiTOCPlaceholder))
+			}
+			sb.WriteString("</ul><mbp:pagebreak/><hr/>")
+			sb.WriteString(annotated)
+			if hasComments {
+				sb.WriteString(fmt.Sprintf(`<hr/><a name="inkfeed-toc-%d"></a><h2>Comments</h2>`, len(labels)) + commentsHTML)
+			}
+		} else {
+			sb.WriteString(article.Content)
+			if hasComments {
+				sb.WriteString("<hr/><h2>Comments</h2>" + commentsHTML)
+			}
+		}
+		sb.WriteString("</body></html>")
+		htmlContent = sb.String()
 
 	case len(req.URLs) > 0:
 		htmlContent = fetchAndCombine(req.URLs, req.Title)
@@ -522,8 +551,33 @@ func fetchAndCombine(urls []string, feedTitle string) string {
 const mobiTOCPlaceholder = "0000000000"
 
 var mobiTOCAnchorRe = regexp.MustCompile(`<a name="inkfeed-toc-(\d+)"></a>`)
-var mobiTOCLabelRe = regexp.MustCompile(`(?s)<h2>(.*?)</h2>`)
+var mobiTOCLabelRe = regexp.MustCompile(`(?is)<h[1-6][^>]*>(.*?)</h[1-6]>`)
 var mobiTagStripRe = regexp.MustCompile(`<[^>]*>`)
+var mobiHeadingRe = regexp.MustCompile(`(?is)<h[1-4][^>]*>(.*?)</h[1-4]>`)
+
+// annotateArticleHeadings inserts a TOC anchor (<a name="inkfeed-toc-N">) before
+// each heading in an article body, numbering from startIdx, and returns the
+// annotated HTML along with the ordered heading labels. It powers the
+// single-article table of contents.
+func annotateArticleHeadings(content string, startIdx int) (string, []string) {
+	var labels []string
+	var b strings.Builder
+	last := 0
+	idx := startIdx
+	for _, m := range mobiHeadingRe.FindAllStringSubmatchIndex(content, -1) {
+		label := strings.TrimSpace(html.UnescapeString(mobiTagStripRe.ReplaceAllString(content[m[2]:m[3]], "")))
+		if label == "" {
+			continue
+		}
+		b.WriteString(content[last:m[0]])
+		b.WriteString(fmt.Sprintf(`<a name="inkfeed-toc-%d"></a>`, idx))
+		last = m[0]
+		labels = append(labels, label)
+		idx++
+	}
+	b.WriteString(content[last:])
+	return b.String(), labels
+}
 
 // buildMobiTOC extracts NCX navigation points from the finalized HTML: one per
 // <a name="inkfeed-toc-N"> anchor, at that anchor's byte offset, labelled with
