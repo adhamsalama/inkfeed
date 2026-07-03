@@ -14,15 +14,20 @@ import (
 type fakeFetcher struct {
 	fail     map[string]bool
 	comments string
+	content  string // overrides the default article body when set
 }
 
 func (f fakeFetcher) FetchReadable(rawURL string) (readability.Article, error) {
 	if f.fail[rawURL] {
 		return readability.Article{}, fmt.Errorf("fetch failed: %s", rawURL)
 	}
+	body := f.content
+	if body == "" {
+		body = "<h2>Section</h2><p>body content</p>"
+	}
 	return readability.Article{
 		Title:       "Title " + rawURL,
-		Content:     "<h2>Section</h2><p>body content</p>",
+		Content:     body,
 		TextContent: "body content",
 	}, nil
 }

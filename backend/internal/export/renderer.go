@@ -124,27 +124,10 @@ func (mobiRenderer) Ext() string  { return "mobi" }
 func (mobiRenderer) Mime() string { return "application/x-mobipocket-ebook" }
 
 func (mobiRenderer) Render(f Fetcher, req Request) ([]byte, string, error) {
-	var htmlContent, title string
-	if req.bulk() {
-		title = firstNonEmpty(req.Title, "Articles")
-		htmlContent = fetchAndCombine(f, req.URLs, title)
-	} else {
-		article, err := f.FetchReadable(req.URL)
-		if err != nil {
-			return nil, "", err
-		}
-		title = firstNonEmpty(req.Title, article.Title, "Article")
-		htmlContent = mobiSingleBody(title, req.URL, article, f.FetchComments(req.CommentsURL))
+	htmlContent, imageRecords, title, err := assembleMobi(f, req)
+	if err != nil {
+		return nil, "", err
 	}
-
-	var imageRecords [][]byte
-	if req.EmbedImages {
-		htmlContent, imageRecords = downloadAndEmbedMobiImages(htmlContent)
-	}
-	// Resolve TOC filepos links to byte offsets after image embedding has fixed
-	// the final layout.
-	htmlContent = patchMobiTOCFilepos(htmlContent)
-
 	data, err := mobi.Write(mobi.Book{
 		Title:   title,
 		Author:  req.Author,
@@ -152,6 +135,32 @@ func (mobiRenderer) Render(f Fetcher, req Request) ([]byte, string, error) {
 		TOC:     buildMobiTOC(htmlContent),
 	}, imageRecords)
 	return data, title, err
+}
+
+// assembleMobi builds the finalized MOBI HTML (with comments, embedded-image
+// recindex markers, and resolved TOC filepos offsets) plus the image records.
+// It is kept separate from mobi.Write so the assembled HTML — which the binary
+// MOBI output makes hard to inspect — is directly unit-testable.
+func assembleMobi(f Fetcher, req Request) (htmlContent string, imageRecords [][]byte, title string, err error) {
+	if req.bulk() {
+		title = firstNonEmpty(req.Title, "Articles")
+		htmlContent = fetchAndCombine(f, req.URLs, title)
+	} else {
+		article, ferr := f.FetchReadable(req.URL)
+		if ferr != nil {
+			return "", nil, "", ferr
+		}
+		title = firstNonEmpty(req.Title, article.Title, "Article")
+		htmlContent = mobiSingleBody(title, req.URL, article, f.FetchComments(req.CommentsURL))
+	}
+
+	if req.EmbedImages {
+		htmlContent, imageRecords = downloadAndEmbedMobiImages(htmlContent)
+	}
+	// Resolve TOC filepos links to byte offsets after image embedding has fixed
+	// the final layout.
+	htmlContent = patchMobiTOCFilepos(htmlContent)
+	return htmlContent, imageRecords, title, nil
 }
 
 // mobiSingleBody assembles a single-article MOBI document, including a
