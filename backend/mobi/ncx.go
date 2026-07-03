@@ -154,6 +154,27 @@ func pad4(b []byte) []byte {
 	return b
 }
 
+// flisRecord returns the fixed 36-byte FLIS record kindlegen/calibre emit.
+func flisRecord() []byte {
+	return []byte{
+		'F', 'L', 'I', 'S', 0, 0, 0, 8, 0, 0x41, 0, 0, 0, 0, 0, 0,
+		0xff, 0xff, 0xff, 0xff, 0, 1, 0, 3, 0, 0, 0, 3, 0, 0, 0, 1,
+		0xff, 0xff, 0xff, 0xff,
+	}
+}
+
+// fcisRecord returns the 44-byte FCIS record; textLen is the uncompressed text
+// length, stored at offset 20 as in calibre's output.
+func fcisRecord(textLen int) []byte {
+	r := []byte{
+		'F', 'C', 'I', 'S', 0, 0, 0, 0x14, 0, 0, 0, 0x10, 0, 0, 0, 1,
+		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x20,
+		0, 0, 0, 8, 0, 1, 0, 1, 0, 0, 0, 0,
+	}
+	binary.BigEndian.PutUint32(r[20:], uint32(textLen))
+	return r
+}
+
 // buildNCXRecords builds the three PDB records that make up a flat MOBI NCX
 // index: the master INDX record (with its TAGX tag table), the data INDX record
 // (one entry per TOC point, plus an IDXT offset trailer), and the CNCX record

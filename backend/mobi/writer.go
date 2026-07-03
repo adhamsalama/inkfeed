@@ -79,7 +79,7 @@ func Write(book Book, imageRecords [][]byte) ([]byte, error) {
 	exthData := generateExthHeader(book.Author)
 	palmDocData := generatePalmDocHeader(len(htmlBytes), len(textRecords))
 	titleBytes := []byte(book.Title)
-	mobiData := generateMobiHeader(palmDocHeaderSize, len(exthData), len(titleBytes), len(textRecords), len(ncxRecords), len(imageRecords))
+	mobiData := generateMobiHeader(palmDocHeaderSize, len(exthData), len(titleBytes), len(textRecords), len(ncxRecords), len(imageRecords), hasTOC)
 
 	// Record 0: PalmDocHeader + MobiHeader + ExthHeader + padded title
 	record0 := concat(palmDocData, mobiData, exthData)
@@ -87,11 +87,16 @@ func Write(book Book, imageRecords [][]byte) ([]byte, error) {
 	record0 = append(record0, titleBytes...)
 	record0 = append(record0, make([]byte, titlePadding+2)...)
 
-	// Records: header, text, NCX index, images, EOF
+	// Records: header, text, NCX index, images, [FLIS, FCIS], EOF.
+	// FLIS/FCIS are emitted only alongside a TOC, matching kindlegen/calibre
+	// output that Kindle expects when an index is present.
 	records := [][]byte{record0}
 	records = append(records, textRecords...)
 	records = append(records, ncxRecords...)
 	records = append(records, imageRecords...)
+	if hasTOC {
+		records = append(records, flisRecord(), fcisRecord(len(htmlBytes)))
+	}
 	records = append(records, []byte{0xe9, 0x8e, 0x0d, 0x0a}) // EOF record
 
 	palmDbData := generatePalmDatabaseHeader(book.Title, records)
@@ -185,7 +190,7 @@ func generatePalmDocHeader(textSize, textRecordCount int) []byte {
 // Fields with swapEndian=false in the JS source are written little-endian here.
 // All 0xFFFFFFFF fields are identical in both endiannesses; only
 // unknown_bytes_2=0x00000001 is materially little-endian.
-func generateMobiHeader(palmDocLen, exthLen, titleLen, textRecordsCount, ncxRecordsCount, imageRecordsCount int) []byte {
+func generateMobiHeader(palmDocLen, exthLen, titleLen, textRecordsCount, ncxRecordsCount, imageRecordsCount int, hasTOC bool) []byte {
 	h := make([]byte, mobiHeaderSize)
 	o := 0
 
@@ -199,7 +204,13 @@ func generateMobiHeader(palmDocLen, exthLen, titleLen, textRecordsCount, ncxReco
 	o += 4
 	binary.BigEndian.PutUint32(h[o:], 2596053606) // unique_id
 	o += 4
-	binary.BigEndian.PutUint32(h[o:], 5) // mobi_file_version
+	// mobi_file_version: 6 enables the MOBI 6 feature set (incl. the NCX index)
+	// that Kindle needs to expose the TOC; keep 5 for plain single-article files.
+	fileVersion := uint32(5)
+	if hasTOC {
+		fileVersion = 6
+	}
+	binary.BigEndian.PutUint32(h[o:], fileVersion) // mobi_file_version
 	o += 4
 
 	// These fields use swapEndian=false (little-endian) in the JS source.
@@ -248,13 +259,22 @@ func generateMobiHeader(palmDocLen, exthLen, titleLen, textRecordsCount, ncxReco
 
 	binary.LittleEndian.PutUint32(h[o:], 0x00000001) // unknown_bytes_2 (LE!)
 	o += 4
-	binary.LittleEndian.PutUint32(h[o:], 0xffffffff) // fcis_record_number
+	// FLIS/FCIS records follow the image records when a TOC is present.
+	flisNum := uint32(0xffffffff)
+	fcisNum := uint32(0xffffffff)
+	var flisCount, fcisCount uint32
+	if hasTOC {
+		flisNum = uint32(textRecordsCount + 1 + ncxRecordsCount + imageRecordsCount)
+		fcisNum = flisNum + 1
+		flisCount, fcisCount = 1, 1
+	}
+	binary.BigEndian.PutUint32(h[o:], fcisNum) // fcis_record_number
 	o += 4
-	binary.LittleEndian.PutUint32(h[o:], 0) // fcis_record_count
+	binary.BigEndian.PutUint32(h[o:], fcisCount) // fcis_record_count
 	o += 4
-	binary.LittleEndian.PutUint32(h[o:], 0xffffffff) // flis_record_number
+	binary.BigEndian.PutUint32(h[o:], flisNum) // flis_record_number
 	o += 4
-	binary.LittleEndian.PutUint32(h[o:], 0) // flis_record_count
+	binary.BigEndian.PutUint32(h[o:], flisCount) // flis_record_count
 	o += 4
 	o += 8 // unknown_bytes_3: zeroed
 	binary.LittleEndian.PutUint32(h[o:], 0xffffffff) // unknown_bytes_4
