@@ -14,6 +14,7 @@ import (
 	"log"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -424,10 +425,15 @@ func mobiHandler(w http.ResponseWriter, r *http.Request) {
 		htmlContent, imageRecords = downloadAndEmbedMobiImages(htmlContent)
 	}
 
+	// Resolve the table-of-contents filepos links to their byte offsets. This
+	// must run last, after image embedding has shifted the final byte layout.
+	htmlContent = patchMobiTOCFilepos(htmlContent)
+
 	data, err := mobi.Write(mobi.Book{
 		Title:   req.Title,
 		Author:  req.Author,
 		Content: htmlContent,
+		TOC:     buildMobiTOC(htmlContent),
 	}, imageRecords)
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusInternalServerError)
@@ -478,8 +484,24 @@ func fetchAndCombine(urls []string, feedTitle string) string {
 
 	var sb strings.Builder
 	sb.WriteString("<html><body>")
-	sb.WriteString("<h1>" + html.EscapeString(feedTitle) + "</h1><hr/>")
+	sb.WriteString("<h1>" + html.EscapeString(feedTitle) + "</h1>")
+
+	// Table of contents: one filepos link per article. The filepos values are
+	// placeholders here and are rewritten to real byte offsets by
+	// patchMobiTOCFilepos once the final HTML layout is known. Each link points
+	// at the matching <a name="inkfeed-toc-N"> anchor emitted before its article.
+	sb.WriteString("<h2>Contents</h2><ul>")
 	for _, r := range results {
+		title := r.title
+		if r.err != nil || title == "" {
+			title = "[Failed to fetch article]"
+		}
+		sb.WriteString(fmt.Sprintf(`<li><a filepos="%s">%s</a></li>`, mobiTOCPlaceholder, html.EscapeString(title)))
+	}
+	sb.WriteString("</ul><mbp:pagebreak/><hr/>")
+
+	for i, r := range results {
+		sb.WriteString(fmt.Sprintf(`<a name="inkfeed-toc-%d"></a>`, i))
 		if r.err != nil {
 			sb.WriteString("<h2>[Failed to fetch article]</h2><hr/>")
 		} else {
@@ -490,5 +512,77 @@ func fetchAndCombine(urls []string, feedTitle string) string {
 		}
 	}
 	sb.WriteString("</body></html>")
+	return sb.String()
+}
+
+// mobiTOCPlaceholder is a fixed-width (10-digit) filepos value emitted by
+// fetchAndCombine. patchMobiTOCFilepos rewrites each occurrence in place with a
+// real byte offset; keeping the width fixed means the rewrite never shifts the
+// byte layout, so offsets computed on the assembled document stay valid.
+const mobiTOCPlaceholder = "0000000000"
+
+var mobiTOCAnchorRe = regexp.MustCompile(`<a name="inkfeed-toc-(\d+)"></a>`)
+var mobiTOCLabelRe = regexp.MustCompile(`(?s)<h2>(.*?)</h2>`)
+var mobiTagStripRe = regexp.MustCompile(`<[^>]*>`)
+
+// buildMobiTOC extracts NCX navigation points from the finalized HTML: one per
+// <a name="inkfeed-toc-N"> anchor, at that anchor's byte offset, labelled with
+// the text of the <h2> heading that follows it. The byte offsets match the
+// filepos values patched into the inline Contents list, so the device TOC and
+// the inline links land in the same place.
+func buildMobiTOC(htmlContent string) []mobi.TOCEntry {
+	matches := mobiTOCAnchorRe.FindAllStringIndex(htmlContent, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+	toc := make([]mobi.TOCEntry, 0, len(matches))
+	for _, m := range matches {
+		label := "Article"
+		if lm := mobiTOCLabelRe.FindStringSubmatch(htmlContent[m[1]:]); lm != nil {
+			if text := strings.TrimSpace(html.UnescapeString(mobiTagStripRe.ReplaceAllString(lm[1], ""))); text != "" {
+				label = text
+			}
+		}
+		toc = append(toc, mobi.TOCEntry{Offset: m[0], Label: label})
+	}
+	return toc
+}
+
+// patchMobiTOCFilepos rewrites the placeholder filepos values in the table of
+// contents to the byte offsets of their matching <a name="inkfeed-toc-N">
+// anchors. MOBI filepos values are byte offsets into the (uncompressed) text
+// stream, which is exactly the HTML byte string here. The k-th filepos link
+// (in document order) targets anchor k, matching fetchAndCombine's emission
+// order.
+func patchMobiTOCFilepos(htmlContent string) string {
+	// Map anchor index -> byte offset of the anchor.
+	offsets := map[int]int{}
+	for _, m := range mobiTOCAnchorRe.FindAllStringSubmatchIndex(htmlContent, -1) {
+		idx, err := strconv.Atoi(htmlContent[m[2]:m[3]])
+		if err != nil {
+			continue
+		}
+		offsets[idx] = m[0]
+	}
+	if len(offsets) == 0 {
+		return htmlContent
+	}
+
+	needle := `filepos="` + mobiTOCPlaceholder + `"`
+	var sb strings.Builder
+	rest := htmlContent
+	k := 0
+	for {
+		i := strings.Index(rest, needle)
+		if i < 0 {
+			sb.WriteString(rest)
+			break
+		}
+		sb.WriteString(rest[:i])
+		offset := offsets[k]
+		sb.WriteString(fmt.Sprintf(`filepos="%010d"`, offset))
+		rest = rest[i+len(needle):]
+		k++
+	}
 	return sb.String()
 }

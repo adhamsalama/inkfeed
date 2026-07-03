@@ -12,6 +12,7 @@ const (
 	palmDocHeaderSize = 16
 	palmDbHeaderSize  = 78
 	recordInfoSize    = 8
+	indxHeaderLen     = 192
 
 	exthAuthor              = 100
 	exthCreatorSoftware     = 204
@@ -24,34 +25,67 @@ const (
 type Book struct {
 	Title   string
 	Author  string
-	Content string // HTML content (UTF-8)
+	Content string     // HTML content (UTF-8)
+	TOC     []TOCEntry // optional navigation points for the NCX table of contents
 }
 
 // Write generates a MOBI file and returns the raw bytes.
 // imageRecords holds raw image bytes (JPEG/PNG/GIF) to embed; may be nil.
 func Write(book Book, imageRecords [][]byte) ([]byte, error) {
 	htmlBytes := []byte(book.Content)
+	hasTOC := len(book.TOC) > 0
 
-	// Chunk HTML into 4096-byte records, each with a null terminator.
+	numTextRecords := (len(htmlBytes) + 4095) / 4096
+
+	// When a TOC is present, each text record carries a trailing byte sequence
+	// (TBS) describing which index entries fall in it. Kindle needs these to
+	// populate the Table of Contents; without them the TOC opens empty.
+	var tbs [][]byte
+	if hasTOC {
+		tbs = buildBookTBS(book.TOC, len(htmlBytes), numTextRecords)
+	}
+
+	// Chunk HTML into 4096-byte records. Each record ends with trailing data
+	// entries (read back-to-front): the TBS entry (present only with a TOC) and
+	// a single-byte "multibyte overlap" entry of 0x00 (no split character).
 	var textRecords [][]byte
-	for i := 0; i < len(htmlBytes); i += 4096 {
+	for i, r := 0, 0; i < len(htmlBytes); i, r = i+4096, r+1 {
 		end := i + 4096
 		if end > len(htmlBytes) {
 			end = len(htmlBytes)
 		}
-		chunk := make([]byte, end-i+1)
-		copy(chunk, htmlBytes[i:end])
-		chunk[len(chunk)-1] = 0
+		textChunk := htmlBytes[i:end]
+		if hasTOC {
+			// Kindle expects indexed content PalmDoc-compressed; offsets in the
+			// index/TBS remain into the uncompressed text, so they are unaffected.
+			textChunk = compressPalmDoc(textChunk)
+		}
+		chunk := make([]byte, 0, len(textChunk)+8)
+		chunk = append(chunk, textChunk...)
+		chunk = append(chunk, 0x00) // multibyte overlap trailing entry
+		if hasTOC {
+			content := tbs[r]
+			chunk = append(chunk, content...)
+			chunk = append(chunk, encVarBackward(len(content)+1)...) // TBS entry size, incl. this byte
+		}
 		textRecords = append(textRecords, chunk)
 	}
 	if len(textRecords) == 0 {
 		textRecords = append(textRecords, []byte{0})
 	}
 
+	// Build the NCX table-of-contents index records (master INDX + data INDX +
+	// CNCX). These sit between the text and image records; the MOBI header then
+	// points at the master INDX record so Kindle exposes a real TOC.
+	var ncxRecords [][]byte
+	if hasTOC {
+		ncxRecords = buildNCXRecords(book.TOC, len(htmlBytes))
+	}
+
 	exthData := generateExthHeader(book.Author)
-	palmDocData := generatePalmDocHeader(len(htmlBytes), len(textRecords))
+	palmDocData := generatePalmDocHeader(len(htmlBytes), len(textRecords), hasTOC)
 	titleBytes := []byte(book.Title)
-	mobiData := generateMobiHeader(palmDocHeaderSize, len(exthData), len(titleBytes), len(textRecords), len(imageRecords))
+	mobiData := generateMobiHeader(palmDocHeaderSize, len(exthData), len(titleBytes), len(textRecords), len(ncxRecords), len(imageRecords), hasTOC)
 
 	// Record 0: PalmDocHeader + MobiHeader + ExthHeader + padded title
 	record0 := concat(palmDocData, mobiData, exthData)
@@ -59,10 +93,16 @@ func Write(book Book, imageRecords [][]byte) ([]byte, error) {
 	record0 = append(record0, titleBytes...)
 	record0 = append(record0, make([]byte, titlePadding+2)...)
 
-	// Records: header, text, images, EOF
+	// Records: header, text, NCX index, images, [FLIS, FCIS], EOF.
+	// FLIS/FCIS are emitted only alongside a TOC, matching kindlegen/calibre
+	// output that Kindle expects when an index is present.
 	records := [][]byte{record0}
 	records = append(records, textRecords...)
+	records = append(records, ncxRecords...)
 	records = append(records, imageRecords...)
+	if hasTOC {
+		records = append(records, flisRecord(), fcisRecord(len(htmlBytes)))
+	}
 	records = append(records, []byte{0xe9, 0x8e, 0x0d, 0x0a}) // EOF record
 
 	palmDbData := generatePalmDatabaseHeader(book.Title, records)
@@ -143,9 +183,13 @@ func generateExthHeader(author string) []byte {
 	return buf
 }
 
-func generatePalmDocHeader(textSize, textRecordCount int) []byte {
+func generatePalmDocHeader(textSize, textRecordCount int, compressed bool) []byte {
 	h := make([]byte, palmDocHeaderSize)
-	binary.BigEndian.PutUint16(h[0:], 1)                              // compression: none
+	compression := uint16(1) // none
+	if compressed {
+		compression = 2 // PalmDoc
+	}
+	binary.BigEndian.PutUint16(h[0:], compression)                   // compression
 	binary.BigEndian.PutUint32(h[4:], uint32(textSize))               // text_length
 	binary.BigEndian.PutUint16(h[8:], uint16(textRecordCount))        // text_record_count
 	binary.BigEndian.PutUint16(h[10:], 4096)                          // text_max_record_size
@@ -156,7 +200,7 @@ func generatePalmDocHeader(textSize, textRecordCount int) []byte {
 // Fields with swapEndian=false in the JS source are written little-endian here.
 // All 0xFFFFFFFF fields are identical in both endiannesses; only
 // unknown_bytes_2=0x00000001 is materially little-endian.
-func generateMobiHeader(palmDocLen, exthLen, titleLen, textRecordsCount, imageRecordsCount int) []byte {
+func generateMobiHeader(palmDocLen, exthLen, titleLen, textRecordsCount, ncxRecordsCount, imageRecordsCount int, hasTOC bool) []byte {
 	h := make([]byte, mobiHeaderSize)
 	o := 0
 
@@ -170,7 +214,13 @@ func generateMobiHeader(palmDocLen, exthLen, titleLen, textRecordsCount, imageRe
 	o += 4
 	binary.BigEndian.PutUint32(h[o:], 2596053606) // unique_id
 	o += 4
-	binary.BigEndian.PutUint32(h[o:], 5) // mobi_file_version
+	// mobi_file_version: 6 enables the MOBI 6 feature set (incl. the NCX index)
+	// that Kindle needs to expose the TOC; keep 5 for plain single-article files.
+	fileVersion := uint32(5)
+	if hasTOC {
+		fileVersion = 6
+	}
+	binary.BigEndian.PutUint32(h[o:], fileVersion) // mobi_file_version
 	o += 4
 
 	// These fields use swapEndian=false (little-endian) in the JS source.
@@ -198,7 +248,7 @@ func generateMobiHeader(palmDocLen, exthLen, titleLen, textRecordsCount, imageRe
 	o += 8 // dictionary_input/output_language: 0
 	binary.BigEndian.PutUint32(h[o:], 6) // minimum_mobipocket_version
 	o += 4
-	binary.BigEndian.PutUint32(h[o:], uint32(textRecordsCount+1)) // first_image_index
+	binary.BigEndian.PutUint32(h[o:], uint32(textRecordsCount+1+ncxRecordsCount)) // first_image_index
 	o += 4
 	o += 16 // huffman fields: 0
 	binary.BigEndian.PutUint32(h[o:], 80) // exth_flags
@@ -214,18 +264,27 @@ func generateMobiHeader(palmDocLen, exthLen, titleLen, textRecordsCount, imageRe
 
 	binary.BigEndian.PutUint16(h[o:], 1) // first_content_record_number
 	o += 2
-	binary.BigEndian.PutUint16(h[o:], uint16(textRecordsCount+imageRecordsCount)) // last_content_record_number
+	binary.BigEndian.PutUint16(h[o:], uint16(textRecordsCount+ncxRecordsCount+imageRecordsCount)) // last_content_record_number
 	o += 2
 
 	binary.LittleEndian.PutUint32(h[o:], 0x00000001) // unknown_bytes_2 (LE!)
 	o += 4
-	binary.LittleEndian.PutUint32(h[o:], 0xffffffff) // fcis_record_number
+	// FLIS/FCIS records follow the image records when a TOC is present.
+	flisNum := uint32(0xffffffff)
+	fcisNum := uint32(0xffffffff)
+	var flisCount, fcisCount uint32
+	if hasTOC {
+		flisNum = uint32(textRecordsCount + 1 + ncxRecordsCount + imageRecordsCount)
+		fcisNum = flisNum + 1
+		flisCount, fcisCount = 1, 1
+	}
+	binary.BigEndian.PutUint32(h[o:], fcisNum) // fcis_record_number
 	o += 4
-	binary.LittleEndian.PutUint32(h[o:], 0) // fcis_record_count
+	binary.BigEndian.PutUint32(h[o:], fcisCount) // fcis_record_count
 	o += 4
-	binary.LittleEndian.PutUint32(h[o:], 0xffffffff) // flis_record_number
+	binary.BigEndian.PutUint32(h[o:], flisNum) // flis_record_number
 	o += 4
-	binary.LittleEndian.PutUint32(h[o:], 0) // flis_record_count
+	binary.BigEndian.PutUint32(h[o:], flisCount) // flis_record_count
 	o += 4
 	o += 8 // unknown_bytes_3: zeroed
 	binary.LittleEndian.PutUint32(h[o:], 0xffffffff) // unknown_bytes_4
@@ -236,9 +295,21 @@ func generateMobiHeader(palmDocLen, exthLen, titleLen, textRecordsCount, imageRe
 	binary.LittleEndian.PutUint32(h[o:], 0xffffffff) // unknown_bytes_7
 	o += 4
 	o += 2 // unknown_bytes_8: zeroed
-	binary.BigEndian.PutUint16(h[o:], 1) // traildata_flags
+	// extra_data_flags: bit0 = multibyte overlap trailing bytes (always), bit1 =
+	// per-record index trailing byte sequences (only when a TOC/NCX is present).
+	traildataFlags := uint16(1)
+	if ncxRecordsCount > 0 {
+		traildataFlags = 3
+	}
+	binary.BigEndian.PutUint16(h[o:], traildataFlags) // traildata_flags
 	o += 2
-	binary.LittleEndian.PutUint32(h[o:], 0xffffffff) // first_indx_record_number
+	// first_indx_record_number: points at the master NCX INDX record so Kindle
+	// exposes a Table of Contents. 0xFFFFFFFF when there is no TOC.
+	if ncxRecordsCount > 0 {
+		binary.BigEndian.PutUint32(h[o:], uint32(textRecordsCount+1))
+	} else {
+		binary.LittleEndian.PutUint32(h[o:], 0xffffffff)
+	}
 	// o += 4  (last field)
 
 	return h
