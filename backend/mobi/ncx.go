@@ -34,6 +34,119 @@ func encVarForward(n int) []byte {
 	return b
 }
 
+// encVarBackward encodes n as a MOBI backward variable-length integer: like
+// encVarForward but with the high bit set on the FINAL byte, suitable for
+// appending to a buffer (the reader scans it from the end).
+func encVarBackward(n int) []byte {
+	if n <= 0 {
+		return []byte{0x80}
+	}
+	var b []byte
+	for n > 0 {
+		b = append([]byte{byte(n & 0x7f)}, b...)
+		n >>= 7
+	}
+	b[len(b)-1] |= 0x80
+	return b
+}
+
+// encodeTBS encodes val together with flag_size low bits of flags as a
+// forward-varint, then appends the flagged extras in calibre's order:
+// 0b010 → varint value, 0b100 → single count byte, 0b001 → varint value.
+func encodeTBS(val int, flags int, val010, count100, val001 int, has010, has100, has001 bool) []byte {
+	fv := (val << 3) | (flags & 0b111)
+	ans := encVarForward(fv)
+	if has010 {
+		ans = append(ans, encVarForward(val010)...)
+	}
+	if has100 {
+		ans = append(ans, byte(count100))
+	}
+	if has001 {
+		ans = append(ans, encVarForward(val001)...)
+	}
+	return ans
+}
+
+// tbsNode is an index entry positioned in the text stream.
+type tbsNode struct {
+	offset, nextOffset, index int
+}
+
+// buildBookTBS computes the trailing byte sequence (TBS) content for each text
+// record of a (non-periodical) book, porting calibre's
+// Indexer.calculate_trailing_byte_sequences + TBS.book_tbs. Element r is the
+// TBS content for text record r (may be empty). textLen is the uncompressed
+// text length; numRecords is the number of 4096-byte text records.
+func buildBookTBS(toc []TOCEntry, textLen, numRecords int) [][]byte {
+	nodes := make([]tbsNode, len(toc))
+	for i, e := range toc {
+		next := textLen
+		if i+1 < len(toc) {
+			next = toc[i+1].Offset
+		}
+		nodes[i] = tbsNode{offset: e.Offset, nextOffset: next, index: i}
+	}
+
+	out := make([][]byte, numRecords)
+	for r := 0; r < numRecords; r++ {
+		offset := r * 4096
+		next := offset + 4096
+		var starts, completes, ends []tbsNode
+		var spanner *tbsNode
+		for k := range nodes {
+			nd := nodes[k]
+			if nd.offset >= next {
+				break // sorted by offset, all remaining start later (flat: all same depth)
+			}
+			if nd.nextOffset <= offset {
+				continue
+			}
+			if nd.offset >= offset {
+				if nd.nextOffset <= next {
+					completes = append(completes, nd)
+				} else {
+					starts = append(starts, nd)
+				}
+			} else if nd.nextOffset <= next {
+				ends = append(ends, nd)
+			} else {
+				n := nodes[k]
+				spanner = &n
+			}
+		}
+		out[r] = bookTBSBytes(starts, completes, ends, spanner)
+	}
+	return out
+}
+
+func bookTBSBytes(starts, completes, ends []tbsNode, spanner *tbsNode) []byte {
+	if spanner != nil {
+		// flags 0b010|0b001, both values 0
+		return encodeTBS(spanner.index, 0b011, 0, 0, 0, true, false, true)
+	}
+	if len(completes) == 0 &&
+		((len(starts) == 1 && len(ends) == 0) || (len(ends) == 1 && len(starts) == 0)) {
+		nd := ends
+		if len(starts) > 0 {
+			nd = starts
+		}
+		return encodeTBS(nd[0].index, 0b010, 0, 0, 0, true, false, false)
+	}
+	all := append(append(append([]tbsNode{}, starts...), completes...), ends...)
+	if len(all) == 0 {
+		return nil
+	}
+	min := all[0]
+	for _, n := range all {
+		if n.index < min.index {
+			min = n
+		}
+	}
+	// flags 0b010 (value 0) | 0b100 (count byte)
+	return encodeTBS(min.index, 0b110, 0, len(all), 0, true, true, false)
+}
+
 func pad4(b []byte) []byte {
 	for len(b)%4 != 0 {
 		b = append(b, 0)

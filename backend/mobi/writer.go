@@ -33,17 +33,35 @@ type Book struct {
 // imageRecords holds raw image bytes (JPEG/PNG/GIF) to embed; may be nil.
 func Write(book Book, imageRecords [][]byte) ([]byte, error) {
 	htmlBytes := []byte(book.Content)
+	hasTOC := len(book.TOC) > 0
 
-	// Chunk HTML into 4096-byte records, each with a null terminator.
+	numTextRecords := (len(htmlBytes) + 4095) / 4096
+
+	// When a TOC is present, each text record carries a trailing byte sequence
+	// (TBS) describing which index entries fall in it. Kindle needs these to
+	// populate the Table of Contents; without them the TOC opens empty.
+	var tbs [][]byte
+	if hasTOC {
+		tbs = buildBookTBS(book.TOC, len(htmlBytes), numTextRecords)
+	}
+
+	// Chunk HTML into 4096-byte records. Each record ends with trailing data
+	// entries (read back-to-front): the TBS entry (present only with a TOC) and
+	// a single-byte "multibyte overlap" entry of 0x00 (no split character).
 	var textRecords [][]byte
-	for i := 0; i < len(htmlBytes); i += 4096 {
+	for i, r := 0, 0; i < len(htmlBytes); i, r = i+4096, r+1 {
 		end := i + 4096
 		if end > len(htmlBytes) {
 			end = len(htmlBytes)
 		}
-		chunk := make([]byte, end-i+1)
-		copy(chunk, htmlBytes[i:end])
-		chunk[len(chunk)-1] = 0
+		chunk := make([]byte, 0, end-i+8)
+		chunk = append(chunk, htmlBytes[i:end]...)
+		chunk = append(chunk, 0x00) // multibyte overlap trailing entry
+		if hasTOC {
+			content := tbs[r]
+			chunk = append(chunk, content...)
+			chunk = append(chunk, encVarBackward(len(content)+1)...) // TBS entry size, incl. this byte
+		}
 		textRecords = append(textRecords, chunk)
 	}
 	if len(textRecords) == 0 {
@@ -54,7 +72,7 @@ func Write(book Book, imageRecords [][]byte) ([]byte, error) {
 	// CNCX). These sit between the text and image records; the MOBI header then
 	// points at the master INDX record so Kindle exposes a real TOC.
 	var ncxRecords [][]byte
-	if len(book.TOC) > 0 {
+	if hasTOC {
 		ncxRecords = buildNCXRecords(book.TOC, len(htmlBytes))
 	}
 
@@ -247,7 +265,13 @@ func generateMobiHeader(palmDocLen, exthLen, titleLen, textRecordsCount, ncxReco
 	binary.LittleEndian.PutUint32(h[o:], 0xffffffff) // unknown_bytes_7
 	o += 4
 	o += 2 // unknown_bytes_8: zeroed
-	binary.BigEndian.PutUint16(h[o:], 1) // traildata_flags
+	// extra_data_flags: bit0 = multibyte overlap trailing bytes (always), bit1 =
+	// per-record index trailing byte sequences (only when a TOC/NCX is present).
+	traildataFlags := uint16(1)
+	if ncxRecordsCount > 0 {
+		traildataFlags = 3
+	}
+	binary.BigEndian.PutUint16(h[o:], traildataFlags) // traildata_flags
 	o += 2
 	// first_indx_record_number: points at the master NCX INDX record so Kindle
 	// exposes a Table of Contents. 0xFFFFFFFF when there is no TOC.
