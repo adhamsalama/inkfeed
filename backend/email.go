@@ -13,6 +13,14 @@ import (
 	"github.com/adhamsalama/inkfeed-backend/mobi"
 )
 
+// External provider endpoints. Declared as package vars so tests can point them
+// at an httptest server instead of hitting the live APIs.
+var (
+	brevoAPIURL      = "https://api.brevo.com/v3/smtp/email"
+	mailerSendAPIURL = "https://api.mailersend.com/v1/email"
+	resendAPIURL     = "https://api.resend.com/emails"
+)
+
 // EmailAttachment is a file to attach to an email.
 type EmailAttachment struct {
 	Filename string
@@ -93,7 +101,7 @@ func (b *BrevoSender) Send(msg EmailMessage) error {
 	}
 
 	client := &http.Client{Timeout: 15 * time.Second}
-	req, err := http.NewRequest("POST", "https://api.brevo.com/v3/smtp/email", bytes.NewReader(body))
+	req, err := http.NewRequest("POST", brevoAPIURL, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
@@ -159,7 +167,7 @@ func (m *MailerSendSender) Send(msg EmailMessage) error {
 	}
 
 	client := &http.Client{Timeout: 15 * time.Second}
-	req, err := http.NewRequest("POST", "https://api.mailersend.com/v1/email", bytes.NewReader(body))
+	req, err := http.NewRequest("POST", mailerSendAPIURL, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
@@ -224,7 +232,7 @@ func (r *ResendSender) Send(msg EmailMessage) error {
 	}
 
 	client := &http.Client{Timeout: 15 * time.Second}
-	req, err := http.NewRequest("POST", "https://api.resend.com/emails", bytes.NewReader(body))
+	req, err := http.NewRequest("POST", resendAPIURL, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}

@@ -78,9 +78,9 @@ func jsonError(w http.ResponseWriter, message string, code int) {
 	json.NewEncoder(w).Encode(map[string]string{"error": message})
 }
 
-func main() {
-	godotenv.Load()
-
+// applyEnvConfig reads process configuration from environment variables. It is
+// separated from main so it can be exercised in tests.
+func applyEnvConfig() {
 	if v := os.Getenv("ALLOWED_ORIGINS"); v != "" {
 		allowedOrigins = strings.Split(v, ",")
 	}
@@ -90,20 +90,18 @@ func main() {
 	if v := os.Getenv("FEED_PROXY_URL"); v != "" {
 		feedProxyURL = v
 	}
-	port := flag.String("port", "8080", "port to listen on")
-	flag.Parse()
+}
 
-	if envPort := os.Getenv("PORT"); envPort != "" {
-		*port = envPort
-	}
-
-	sqlDB, err := sql.Open("sqlite", "inkfeed.db")
+// setupDB opens the SQLite database at path, applies pragmas, and runs the
+// idempotent schema migrations. It returns the connection ready for db.New.
+func setupDB(path string) (*sql.DB, error) {
+	sqlDB, err := sql.Open("sqlite", path)
 	if err != nil {
-		log.Fatalf("failed to open database: %v", err)
+		return nil, err
 	}
 	sqlDB.SetMaxOpenConns(1)
 	if _, err := sqlDB.Exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000`); err != nil {
-		log.Fatalf("failed to configure database: %v", err)
+		return nil, err
 	}
 	if _, err := sqlDB.Exec(
 		`CREATE TABLE IF NOT EXISTS users (
@@ -158,7 +156,7 @@ func main() {
 			saved_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 		)`,
 	); err != nil {
-		log.Fatalf("failed to migrate database: %v", err)
+		return nil, err
 	}
 	// SQLite doesn't support IF NOT EXISTS on ALTER TABLE; errors are intentionally swallowed.
 	migrate := func(query string) { _, _ = sqlDB.Exec(query) }
@@ -188,14 +186,21 @@ func main() {
 		UNIQUE(feed_url, item_url)
 	)`)
 
-	queries = db.New(sqlDB)
+	return sqlDB, nil
+}
 
+// startBackgroundJobs launches the periodic goroutines (feed scraping, content
+// archiving, cache cleanup, and pruning).
+func startBackgroundJobs() {
 	startFeedScraper()
 	startContentArchiver()
 	startCacheCleanup()
 	startArticleArchivePruner()
 	startFeedItemsPruner()
+}
 
+// newServeMux builds the HTTP router with all routes and their middleware.
+func newServeMux() *http.ServeMux {
 	mux := http.NewServeMux()
 	protected := func(h http.HandlerFunc) http.Handler {
 		return corsMiddleware(authMiddleware(rateLimitMiddleware(http.HandlerFunc(h))))
@@ -220,7 +225,28 @@ func main() {
 	mux.Handle("/email", corsMiddleware(authMiddleware(emailRateLimitMiddleware(http.HandlerFunc(emailHandler)))))
 	mux.Handle("/feed-archive", protected(feedArchiveHandler))
 
+	return mux
+}
+
+func main() {
+	godotenv.Load()
+	applyEnvConfig()
+
+	port := flag.String("port", "8080", "port to listen on")
+	flag.Parse()
+	if envPort := os.Getenv("PORT"); envPort != "" {
+		*port = envPort
+	}
+
+	sqlDB, err := setupDB("inkfeed.db")
+	if err != nil {
+		log.Fatalf("failed to set up database: %v", err)
+	}
+	queries = db.New(sqlDB)
+
+	startBackgroundJobs()
+
 	addr := ":" + *port
 	log.Printf("Server listening on %s", addr)
-	log.Fatal(http.ListenAndServe(addr, loggingMiddleware(mux)))
+	log.Fatal(http.ListenAndServe(addr, loggingMiddleware(newServeMux())))
 }
