@@ -482,18 +482,13 @@ func fetchAndCombine(urls []string, feedTitle string) string {
 	wg.Wait()
 
 	var sb strings.Builder
-	// The <guide> reference registers the Contents section as the book's Table
-	// of Contents, so Kindle's "Go to → Table of Contents" menu points at it.
-	// Its filepos is a placeholder rewritten by patchMobiTOCFilepos to the byte
-	// offset of the inkfeed-toc-nav anchor below.
-	sb.WriteString(`<html><head><guide><reference type="toc" title="Table of Contents" filepos="` + mobiTOCGuidePlaceholder + `"></reference></guide></head><body>`)
+	sb.WriteString("<html><body>")
 	sb.WriteString("<h1>" + html.EscapeString(feedTitle) + "</h1>")
 
 	// Table of contents: one filepos link per article. The filepos values are
 	// placeholders here and are rewritten to real byte offsets by
 	// patchMobiTOCFilepos once the final HTML layout is known. Each link points
 	// at the matching <a name="inkfeed-toc-N"> anchor emitted before its article.
-	sb.WriteString(`<a name="inkfeed-toc-nav"></a>`)
 	sb.WriteString("<h2>Contents</h2><ul>")
 	for _, r := range results {
 		title := r.title
@@ -525,19 +520,14 @@ func fetchAndCombine(urls []string, feedTitle string) string {
 // byte layout, so offsets computed on the assembled document stay valid.
 const mobiTOCPlaceholder = "0000000000"
 
-// mobiTOCGuidePlaceholder is a distinct 10-digit placeholder for the <guide>
-// TOC reference so it is never confused with the per-article link placeholder.
-const mobiTOCGuidePlaceholder = "0000000001"
-
 var mobiTOCAnchorRe = regexp.MustCompile(`<a name="inkfeed-toc-(\d+)"></a>`)
-var mobiTOCNavAnchorRe = regexp.MustCompile(`<a name="inkfeed-toc-nav"></a>`)
 
 // patchMobiTOCFilepos rewrites the placeholder filepos values in the table of
 // contents to the byte offsets of their matching <a name="inkfeed-toc-N">
-// anchors, and the <guide> reference to the Contents section. MOBI filepos
-// values are byte offsets into the (uncompressed) text stream, which is exactly
-// the HTML byte string here. The k-th article filepos link (in document order)
-// targets anchor k, matching fetchAndCombine's emission order.
+// anchors. MOBI filepos values are byte offsets into the (uncompressed) text
+// stream, which is exactly the HTML byte string here. The k-th filepos link
+// (in document order) targets anchor k, matching fetchAndCombine's emission
+// order.
 func patchMobiTOCFilepos(htmlContent string) string {
 	// Map anchor index -> byte offset of the anchor.
 	offsets := map[int]int{}
@@ -550,13 +540,6 @@ func patchMobiTOCFilepos(htmlContent string) string {
 	}
 	if len(offsets) == 0 {
 		return htmlContent
-	}
-
-	// Point the <guide> TOC reference at the Contents navigation anchor.
-	if m := mobiTOCNavAnchorRe.FindStringIndex(htmlContent); m != nil {
-		htmlContent = strings.Replace(htmlContent,
-			`filepos="`+mobiTOCGuidePlaceholder+`"`,
-			fmt.Sprintf(`filepos="%010d"`, m[0]), 1)
 	}
 
 	needle := `filepos="` + mobiTOCPlaceholder + `"`
