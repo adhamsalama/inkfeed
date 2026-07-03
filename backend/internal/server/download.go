@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/adhamsalama/inkfeed-backend/internal/content"
 	"github.com/adhamsalama/inkfeed-backend/mobi"
 	"github.com/srwiley/oksvg"
 	"github.com/srwiley/rasterx"
@@ -105,7 +106,7 @@ func downloadAndEmbedMobiImages(bodyHTML string) (string, [][]byte) {
 		// "Desktop" and "Mobile" variants of the same figure that CSS media
 		// queries would hide, but without CSS both would render. Keep the first
 		// variant seen and drop the rest.
-		if key := responsiveVariantKey(useURL); key != "" {
+		if key := content.ResponsiveVariantKey(useURL); key != "" {
 			if variantSeen[key] {
 				return ""
 			}
@@ -127,7 +128,7 @@ func downloadAndEmbedMobiImages(bodyHTML string) (string, [][]byte) {
 				log.Printf("mobi: failed to create image request %s: %v", useURL, err)
 				return imgTag
 			}
-			imgReq.Header.Set("User-Agent", userAgent)
+			imgReq.Header.Set("User-Agent", content.UserAgent)
 			resp, err := http.DefaultClient.Do(imgReq)
 			if err != nil {
 				log.Printf("mobi: failed to download image %s: %v", useURL, err)
@@ -200,18 +201,6 @@ func downloadAndEmbedMobiImages(bodyHTML string) (string, [][]byte) {
 	})
 
 	return result, imageRecords
-}
-
-// responsiveVariantKey returns a normalized key identifying a responsive image
-// variant, or "" if the URL carries no responsive marker (so it never
-// participates in dedup). It strips the "desktop"/"mobile" tokens so the two
-// variants of the same figure collapse to the same key.
-func responsiveVariantKey(u string) string {
-	lower := strings.ToLower(u)
-	if !strings.Contains(lower, "desktop") && !strings.Contains(lower, "mobile") {
-		return ""
-	}
-	return strings.NewReplacer("desktop", "", "mobile", "").Replace(lower)
 }
 
 // mobiImgTag returns an <img> tag with recindex="N" (preserving alt if present).

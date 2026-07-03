@@ -79,10 +79,10 @@ func TestStatusRecorder(t *testing.T) {
 
 func TestApplyEnvConfig(t *testing.T) {
 	origOrigins := app.allowedOrigins
-	origProxy := app.proxyURL
+	origProxy := app.content.ProxyURL
 	defer func() {
 		app.allowedOrigins = origOrigins
-		app.proxyURL = origProxy
+		app.content.ProxyURL = origProxy
 	}()
 
 	os.Setenv("ALLOWED_ORIGINS", "https://a.com,https://b.com")
@@ -98,8 +98,8 @@ func TestApplyEnvConfig(t *testing.T) {
 	if !app.isAllowedOrigin("https://a.com") || !app.isAllowedOrigin("http://localhost:8000") {
 		t.Errorf("origins not applied: %v", app.allowedOrigins)
 	}
-	if app.proxyURL != "https://proxy.test" {
-		t.Errorf("proxy = %q", app.proxyURL)
+	if app.content.ProxyURL != "https://proxy.test" {
+		t.Errorf("proxy = %q", app.content.ProxyURL)
 	}
 }
 

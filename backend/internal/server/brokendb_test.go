@@ -78,11 +78,6 @@ func TestHandlersWithBrokenDB(t *testing.T) {
 			func() *http.Request { return putJSON("/favorites", `[{"url":"u","title":"t"}]`, uid) },
 			app.favoritesHandler, http.StatusInternalServerError,
 		},
-		{
-			"feedArchive",
-			func() *http.Request { return httptest.NewRequest(http.MethodGet, "/feed-archive?url=feed", nil) },
-			app.feedArchiveHandler, http.StatusInternalServerError,
-		},
 	}
 
 	for _, tc := range tests {
@@ -95,29 +90,5 @@ func TestHandlersWithBrokenDB(t *testing.T) {
 				t.Errorf("%s: code = %d, want %d", tc.name, w.Code, tc.want)
 			}
 		})
-	}
-}
-
-func TestArticleHandlerArchiveWriteWithBrokenDB(t *testing.T) {
-	// articleHandler: archive lookup fails (broken db) -> falls through to fetch.
-	serveArticleViaProxy(t, articleHTML)
-	restore := withBrokenDB(t)
-	defer restore()
-	w := httptest.NewRecorder()
-	app.articleHandler(w, httptest.NewRequest(http.MethodGet, "/article?url=https://example.com/broken", nil))
-	// Fetch still succeeds; the background archive write fails silently.
-	if w.Code != http.StatusOK {
-		t.Errorf("code = %d", w.Code)
-	}
-}
-
-func TestPruneWithBrokenDB(t *testing.T) {
-	restore := withBrokenDB(t)
-	defer restore()
-	app.pruneArticleArchive() // size query fails -> logs and returns
-	app.pruneFeedItems()      // delete fails -> logs and returns
-	app.scrapeAllFeeds()      // GetDistinctSavedFeedURLs fails -> logs and returns
-	if app.pollContentArchive() {
-		t.Error("pollContentArchive should return false on query error")
 	}
 }

@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -101,28 +100,5 @@ func TestEmailAndEpubSingleWithComments(t *testing.T) {
 	app.emailHandler(w, postJSON("/email", `{"url":"https://example.com/art","to":"k@k.com","format":"mobi","commentsUrl":"https://news.ycombinator.com/item?id=1","embedImages":false}`))
 	if w.Code != http.StatusOK {
 		t.Errorf("email mobi w/comments = %d", w.Code)
-	}
-}
-
-func TestPruneArticleArchiveLoop(t *testing.T) {
-	resetDB(t)
-	// Insert rows whose combined html+text length exceeds the 90MB prune target
-	// so the pruning loop runs and deletes down to target.
-	big := strings.Repeat("A", 20*1024*1024) // 20MB per field
-	for i := 0; i < 3; i++ {
-		app.archiveArticle(
-			"bigkey-"+string(rune('a'+i)),
-			"T", "au", "s", "2024", big, big,
-		)
-	}
-	// 3 rows * 40MB = 120MB > 90MB target -> at least one row pruned.
-	before, _ := app.q.GetArticleArchiveTotalSize(context.Background())
-	if before <= archivePruneTargetBytes {
-		t.Fatalf("setup size %d not above target", before)
-	}
-	app.pruneArticleArchive()
-	after, _ := app.q.GetArticleArchiveTotalSize(context.Background())
-	if after > before {
-		t.Errorf("prune increased size?")
 	}
 }

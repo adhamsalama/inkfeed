@@ -24,17 +24,6 @@ func TestParseSrcset(t *testing.T) {
 	}
 }
 
-func TestResponsiveVariantKey(t *testing.T) {
-	if responsiveVariantKey("https://x/photo.jpg") != "" {
-		t.Errorf("no marker should be empty")
-	}
-	d := responsiveVariantKey("https://x/photo-Desktop.jpg")
-	m := responsiveVariantKey("https://x/photo-Mobile.jpg")
-	if d == "" || d != m {
-		t.Errorf("desktop/mobile should collapse: %q vs %q", d, m)
-	}
-}
-
 func TestMobiImgTag(t *testing.T) {
 	if got := mobiImgTag(`<img src="x" alt="hello">`, 3); got != `<img alt="hello" recindex="3">` {
 		t.Errorf("with alt = %q", got)

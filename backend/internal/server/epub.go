@@ -18,6 +18,7 @@ import (
 
 	_ "golang.org/x/image/webp"
 
+	"github.com/adhamsalama/inkfeed-backend/internal/content"
 	epub "github.com/go-shiori/go-epub"
 )
 
@@ -167,7 +168,7 @@ func downloadAndEmbedImages(bodyHTML string) (string, []embeddedImage) {
 			log.Printf("epub: failed to create image request %s: %v", srcURL, err)
 			return match
 		}
-		imgReq.Header.Set("User-Agent", userAgent)
+		imgReq.Header.Set("User-Agent", content.UserAgent)
 		resp, err := http.DefaultClient.Do(imgReq)
 		if err != nil {
 			log.Printf("epub: failed to download image %s: %v", srcURL, err)

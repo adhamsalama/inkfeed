@@ -1,9 +1,8 @@
-package server
+package content
 
 import (
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 )
 
@@ -64,28 +63,12 @@ func TestDecodeGoogleNewsURLFullFlow(t *testing.T) {
 		googleNewsBatchExecuteURL = origBatch
 	}()
 
-	got, err := decodeGoogleNewsURL("https://news.google.com/articles/CBMiABC")
+	got, err := DecodeGoogleNewsURL("https://news.google.com/articles/CBMiABC")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got != "https://decoded.example/final" {
 		t.Errorf("decoded = %q", got)
-	}
-}
-
-func TestDecodeGoogleNewsHandler(t *testing.T) {
-	// missing url
-	w := httptest.NewRecorder()
-	decodeGoogleNewsHandler(w, httptest.NewRequest(http.MethodGet, "/decode-google-news", nil))
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("missing url = %d", w.Code)
-	}
-
-	// error path (invalid google news url)
-	w = httptest.NewRecorder()
-	decodeGoogleNewsHandler(w, httptest.NewRequest(http.MethodGet, "/decode-google-news?url=https://example.com/x", nil))
-	if w.Code != http.StatusBadGateway {
-		t.Errorf("bad url = %d", w.Code)
 	}
 }
 

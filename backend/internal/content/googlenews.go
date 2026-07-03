@@ -1,4 +1,4 @@
-package server
+package content
 
 import (
 	"encoding/json"
@@ -12,10 +12,6 @@ import (
 	"golang.org/x/net/html"
 )
 
-type GoogleNewsResponse struct {
-	DecodedURL string `json:"decoded_url"`
-}
-
 // External Google News endpoints. Package vars so tests can redirect them to an
 // httptest server. %s is substituted with the base64 article id.
 var (
@@ -26,24 +22,7 @@ var (
 	googleNewsBatchExecuteURL = "https://news.google.com/_/DotsSplashUi/data/batchexecute"
 )
 
-func decodeGoogleNewsHandler(w http.ResponseWriter, r *http.Request) {
-	rawURL := r.URL.Query().Get("url")
-	if rawURL == "" {
-		jsonError(w, "url parameter required", http.StatusBadRequest)
-		return
-	}
-
-	decoded, err := decodeGoogleNewsURL(rawURL)
-	if err != nil {
-		jsonError(w, err.Error(), http.StatusBadGateway)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(GoogleNewsResponse{DecodedURL: decoded})
-}
-
-func decodeGoogleNewsURL(sourceURL string) (string, error) {
+func DecodeGoogleNewsURL(sourceURL string) (string, error) {
 	base64Str, err := extractBase64(sourceURL)
 	if err != nil {
 		return "", err

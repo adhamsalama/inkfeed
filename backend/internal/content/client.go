@@ -1,4 +1,4 @@
-package server
+package content
 
 import (
 	"fmt"
@@ -12,11 +12,11 @@ type ScrappingClientConfig struct {
 	UseProxyFirst bool
 }
 
-func (a *App) newScrappingClient(cfg ScrappingClientConfig) *ScrappingYoungLad {
-	ua := userAgent
+func (s *Service) newClient(cfg ScrappingClientConfig) *ScrappingYoungLad {
+	ua := UserAgent
 	var proxyURL *string
-	if cfg.WithProxy && a.proxyURL != "" {
-		p := a.proxyURL
+	if cfg.WithProxy && s.ProxyURL != "" {
+		p := s.ProxyURL
 		proxyURL = &p
 	}
 	return &ScrappingYoungLad{

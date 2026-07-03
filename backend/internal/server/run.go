@@ -169,11 +169,11 @@ func setupDB(path string) (*sql.DB, error) {
 // startBackgroundJobs launches the periodic goroutines (feed scraping, content
 // archiving, cache cleanup, and pruning).
 func (a *App) startBackgroundJobs() {
-	a.startFeedScraper()
-	a.startContentArchiver()
+	a.content.StartFeedScraper()
+	a.content.StartContentArchiver()
 	a.startCacheCleanup()
-	a.startArticleArchivePruner()
-	a.startFeedItemsPruner()
+	a.content.StartArticleArchivePruner()
+	a.content.StartFeedItemsPruner()
 }
 
 // newServeMux builds the HTTP router with all routes and their middleware.
@@ -198,7 +198,7 @@ func (a *App) newServeMux() *http.ServeMux {
 	mux.Handle("/mobi", protected(a.mobiHandler))
 	mux.Handle("/epub", protected(a.epubHandler))
 	mux.Handle("/reddit-post", protected(a.redditPostHandler))
-	mux.Handle("/decode-google-news", protected(decodeGoogleNewsHandler))
+	mux.Handle("/decode-google-news", protected(a.decodeGoogleNewsHandler))
 	mux.Handle("/email", a.corsMiddleware(a.authMiddleware(a.emailRateLimitMiddleware(http.HandlerFunc(a.emailHandler)))))
 	mux.Handle("/feed-archive", protected(a.feedArchiveHandler))
 

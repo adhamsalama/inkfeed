@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/adhamsalama/inkfeed-backend/internal/content"
 	"github.com/adhamsalama/inkfeed-backend/mobi"
 	readability "github.com/go-shiori/go-readability"
 )
@@ -35,7 +36,7 @@ func (a *App) acquireArticles(urls []string) []fetchedArticle {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			article, err := a.fetchReadable(url)
+			article, err := a.content.FetchReadable(url)
 			if err != nil {
 				out[idx] = fetchedArticle{url: url, err: err}
 				return
@@ -43,7 +44,7 @@ func (a *App) acquireArticles(urls []string) []fetchedArticle {
 			out[idx] = fetchedArticle{
 				url:     url,
 				title:   article.Title,
-				meta:    articleMetaHTML(article),
+				meta:    content.ArticleMeta(article),
 				content: `<p><a href="` + html.EscapeString(url) + `">` + html.EscapeString(url) + `</a></p>` + article.Content,
 			}
 		}(i, u)
@@ -115,12 +116,12 @@ func (mobiRenderer) render(a *App, req exportRequest) ([]byte, string, error) {
 		title = firstNonEmpty(req.title, "Articles")
 		htmlContent = a.fetchAndCombine(req.urls, title)
 	} else {
-		article, err := a.fetchReadable(req.url)
+		article, err := a.content.FetchReadable(req.url)
 		if err != nil {
 			return nil, "", err
 		}
 		title = firstNonEmpty(req.title, article.Title, "Article")
-		htmlContent = a.mobiSingleBody(title, req.url, article, a.fetchCommentsHTML(req.commentsURL))
+		htmlContent = a.mobiSingleBody(title, req.url, article, a.content.FetchComments(req.commentsURL))
 	}
 
 	var imageRecords [][]byte
@@ -153,7 +154,7 @@ func (a *App) mobiSingleBody(title, url string, article readability.Article, com
 	}
 
 	var sb strings.Builder
-	sb.WriteString("<html><body><h1>" + html.EscapeString(title) + "</h1>" + link + articleMetaHTML(article))
+	sb.WriteString("<html><body><h1>" + html.EscapeString(title) + "</h1>" + link + content.ArticleMeta(article))
 	if total >= 2 {
 		sb.WriteString("<h2>Contents</h2><ul>")
 		for _, l := range labels {
@@ -223,12 +224,12 @@ func (epubRenderer) render(a *App, req exportRequest) ([]byte, string, error) {
 		title = firstNonEmpty(req.title, "Articles")
 		body = a.buildEpubMultiArticleBody(req.urls, title)
 	} else {
-		article, err := a.fetchReadable(req.url)
+		article, err := a.content.FetchReadable(req.url)
 		if err != nil {
 			return nil, "", err
 		}
 		title = firstNonEmpty(req.title, article.Title, "Article")
-		body = a.epubSingleBody(title, req.url, article, a.fetchCommentsHTML(req.commentsURL))
+		body = a.epubSingleBody(title, req.url, article, a.content.FetchComments(req.commentsURL))
 	}
 	data, err := generateEpub(title, req.author, body, req.embedImages)
 	return data, title, err
@@ -237,7 +238,7 @@ func (epubRenderer) render(a *App, req exportRequest) ([]byte, string, error) {
 // epubSingleBody assembles a single-article EPUB body.
 func (a *App) epubSingleBody(title, url string, article readability.Article, commentsHTML string) string {
 	link := `<p><a href="` + html.EscapeString(url) + `">` + html.EscapeString(url) + `</a></p>`
-	body := "<h1>" + html.EscapeString(title) + "</h1>" + link + articleMetaHTML(article) + article.Content
+	body := "<h1>" + html.EscapeString(title) + "</h1>" + link + content.ArticleMeta(article) + article.Content
 	if commentsHTML != "" {
 		body += "<hr/><h2>Comments</h2>" + commentsHTML
 	}

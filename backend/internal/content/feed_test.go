@@ -1,9 +1,7 @@
-package server
+package content
 
 import (
-	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 )
 
@@ -88,7 +86,7 @@ func TestFetchAndParseFeedDirect(t *testing.T) {
 		w.Header().Set("Content-Type", "application/rss+xml")
 		w.Write([]byte(rssSample))
 	})
-	resp, err := app.fetchAndParseFeed(srv.URL)
+	resp, err := svc.FetchAndParseFeed(srv.URL)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,43 +102,11 @@ func TestFetchAndParseFeedProxyFallback(t *testing.T) {
 	})
 	setProxyURL(t, proxy.URL)
 	// Use a syntactically valid but unroutable direct URL.
-	resp, err := app.fetchAndParseFeed("http://127.0.0.1:0/nope")
+	resp, err := svc.FetchAndParseFeed("http://127.0.0.1:0/nope")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if resp.Title != "Example Feed" {
 		t.Errorf("proxy fallback title = %q", resp.Title)
-	}
-}
-
-func TestFeedHandler(t *testing.T) {
-	// Missing url param
-	w := httptest.NewRecorder()
-	app.feedHandler(w, httptest.NewRequest(http.MethodGet, "/feed", nil))
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("missing url = %d", w.Code)
-	}
-
-	srv := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(rssSample))
-	})
-	w = httptest.NewRecorder()
-	app.feedHandler(w, httptest.NewRequest(http.MethodGet, "/feed?url="+srv.URL, nil))
-	if w.Code != http.StatusOK {
-		t.Fatalf("feed = %d", w.Code)
-	}
-	var resp FeedResponse
-	json.Unmarshal(w.Body.Bytes(), &resp)
-	if resp.Title != "Example Feed" {
-		t.Errorf("handler title = %q", resp.Title)
-	}
-}
-
-func TestFeedHandlerError(t *testing.T) {
-	setProxyURL(t, "http://127.0.0.1:0/x")
-	w := httptest.NewRecorder()
-	app.feedHandler(w, httptest.NewRequest(http.MethodGet, "/feed?url=http://127.0.0.1:0/bad", nil))
-	if w.Code != http.StatusBadGateway {
-		t.Errorf("feed error = %d", w.Code)
 	}
 }

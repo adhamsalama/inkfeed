@@ -1,10 +1,8 @@
-package server
+package content
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"testing"
 	"time"
@@ -58,9 +56,9 @@ func TestScrapeFeed(t *testing.T) {
 		w.Write([]byte(rssSample))
 	})
 
-	app.scrapeFeed(srv.URL)
+	svc.ScrapeFeed(srv.URL)
 
-	items, err := app.q.GetFeedArchiveItems(context.Background(), feedArchiveParams(srv.URL))
+	items, err := svc.q.GetFeedArchiveItems(context.Background(), feedArchiveParams(srv.URL))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,8 +67,8 @@ func TestScrapeFeed(t *testing.T) {
 	}
 
 	// Scraping again inserts no new items (UNIQUE constraint).
-	app.scrapeFeed(srv.URL)
-	items2, _ := app.q.GetFeedArchiveItems(context.Background(), feedArchiveParams(srv.URL))
+	svc.ScrapeFeed(srv.URL)
+	items2, _ := svc.q.GetFeedArchiveItems(context.Background(), feedArchiveParams(srv.URL))
 	if len(items2) != len(items) {
 		t.Errorf("duplicate scrape added items: %d -> %d", len(items), len(items2))
 	}
@@ -80,7 +78,7 @@ func TestScrapeFeedError(t *testing.T) {
 	resetDB(t)
 	setProxyURL(t, "http://127.0.0.1:0/dead")
 	// Should not panic; just logs and returns.
-	app.scrapeFeed("http://127.0.0.1:0/deadfeed")
+	svc.ScrapeFeed("http://127.0.0.1:0/deadfeed")
 }
 
 func TestScrapeAllFeeds(t *testing.T) {
@@ -89,13 +87,13 @@ func TestScrapeAllFeeds(t *testing.T) {
 		w.Write([]byte(rssSample))
 	})
 	// No feeds -> no-op.
-	app.scrapeAllFeeds()
+	svc.ScrapeAllFeeds()
 
 	uid := createTestUser(t, "scrape@y.com")
-	app.q.InsertUserSavedFeed(context.Background(), savedFeedParams(uid, srv.URL))
-	app.scrapeAllFeeds()
+	svc.q.InsertUserSavedFeed(context.Background(), savedFeedParams(uid, srv.URL))
+	svc.ScrapeAllFeeds()
 
-	items, _ := app.q.GetFeedArchiveItems(context.Background(), feedArchiveParams(srv.URL))
+	items, _ := svc.q.GetFeedArchiveItems(context.Background(), feedArchiveParams(srv.URL))
 	if len(items) == 0 {
 		t.Errorf("scrapeAllFeeds did not insert items")
 	}
@@ -105,8 +103,8 @@ func TestPruneFeedItems(t *testing.T) {
 	resetDB(t)
 	// Insert an item, then prune with huge max age -> nothing deleted.
 	scrapeFeedInsert(t, "feedx", "itemx")
-	app.pruneFeedItems()
-	total, _ := app.q.CountFeedArchiveItems(context.Background(), "feedx")
+	svc.PruneFeedItems()
+	total, _ := svc.q.CountFeedArchiveItems(context.Background(), "feedx")
 	if total != 1 {
 		t.Errorf("recent item wrongly pruned: %d", total)
 	}
@@ -116,7 +114,7 @@ func TestPollContentArchive(t *testing.T) {
 	resetDB(t)
 
 	// No feed items -> returns false.
-	if app.pollContentArchive() {
+	if svc.PollContentArchive() {
 		t.Errorf("expected false with no items")
 	}
 
@@ -128,11 +126,11 @@ func TestPollContentArchive(t *testing.T) {
 	setProxyURL(t, srv.URL)
 	scrapeFeedInsert(t, "feedA", "https://example.com/article-poll")
 
-	if !app.pollContentArchive() {
+	if !svc.PollContentArchive() {
 		t.Errorf("expected true after processing an item")
 	}
 	// The article should now be archived.
-	if _, err := app.q.GetArticleArchive(context.Background(), "https://example.com/article-poll"); err != nil {
+	if _, err := svc.q.GetArticleArchive(context.Background(), "https://example.com/article-poll"); err != nil {
 		t.Errorf("article not archived: %v", err)
 	}
 }
@@ -142,32 +140,8 @@ func TestPollContentArchiveFetchFailure(t *testing.T) {
 	setProxyURL(t, "http://127.0.0.1:0/dead")
 	scrapeFeedInsert(t, "feedB", "http://127.0.0.1:0/deadarticle")
 	// Fetch fails -> marks failed, returns true.
-	if !app.pollContentArchive() {
+	if !svc.PollContentArchive() {
 		t.Errorf("expected true (item processed with failure)")
-	}
-}
-
-func TestFeedArchiveHandler(t *testing.T) {
-	resetDB(t)
-	scrapeFeedInsert(t, "feedH", "https://example.com/h1")
-
-	// missing url
-	w := httptest.NewRecorder()
-	app.feedArchiveHandler(w, httptest.NewRequest(http.MethodGet, "/feed-archive", nil))
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("missing url = %d", w.Code)
-	}
-
-	// valid with pagination params
-	w = httptest.NewRecorder()
-	app.feedArchiveHandler(w, httptest.NewRequest(http.MethodGet, "/feed-archive?url=feedH&limit=10&offset=0", nil))
-	if w.Code != http.StatusOK {
-		t.Fatalf("archive = %d", w.Code)
-	}
-	var resp map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &resp)
-	if resp["total"].(float64) != 1 {
-		t.Errorf("total = %v", resp["total"])
 	}
 }
 
@@ -177,7 +151,7 @@ func TestFetchReadableBackground(t *testing.T) {
 		w.Write([]byte(articleHTML))
 	})
 	setProxyURL(t, srv.URL)
-	a, err := app.fetchReadableBackground("https://example.com/bg")
+	a, err := svc.fetchReadableBackground("https://example.com/bg")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +160,7 @@ func TestFetchReadableBackground(t *testing.T) {
 	}
 
 	setProxyURL(t, "http://127.0.0.1:0/dead")
-	if _, err := app.fetchReadableBackground("http://127.0.0.1:0/dead"); err == nil {
+	if _, err := svc.fetchReadableBackground("http://127.0.0.1:0/dead"); err == nil {
 		t.Error("expected error")
 	}
 }

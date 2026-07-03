@@ -1,13 +1,13 @@
-package server
+package content
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"html"
 	"log"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -24,53 +24,25 @@ type ArticleResponse struct {
 	WordCount     int    `json:"wordCount"`
 }
 
-func (a *App) textHandler(w http.ResponseWriter, r *http.Request) {
-	rawURL := r.URL.Query().Get("url")
-	if rawURL == "" {
-		jsonError(w, "url parameter required", http.StatusBadRequest)
-		return
-	}
-
-	article, err := a.fetchReadable(rawURL)
-	if err != nil {
-		jsonError(w, err.Error(), http.StatusBadGateway)
-		return
-	}
-
-	filename := sanitizeFilename(article.Title) + ".txt"
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
-	w.Write([]byte(article.TextContent))
-}
-
-func (a *App) articleHandler(w http.ResponseWriter, r *http.Request) {
-	rawURL := r.URL.Query().Get("url")
-	if rawURL == "" {
-		jsonError(w, "url parameter required", http.StatusBadRequest)
-		return
-	}
-
-	if row, err := a.q.GetArticleArchive(r.Context(), rawURL); err == nil {
+// Article returns the readable article for rawURL, served from the archive cache
+// when present. On a cache miss it fetches with Readability, then archives the
+// result in the background.
+func (s *Service) Article(rawURL string) (ArticleResponse, error) {
+	if row, err := s.q.GetArticleArchive(context.Background(), rawURL); err == nil {
 		log.Printf("cache hit (archive): %s", rawURL)
-		resp := ArticleResponse{
+		return ArticleResponse{
 			Title:         row.Title,
 			Content:       row.HtmlContent,
 			Byline:        row.Author,
 			SiteName:      row.SiteName,
 			PublishedTime: row.CreatedAt,
 			WordCount:     len(strings.Fields(row.TextContent)),
-		}
-		body, _ := json.Marshal(resp)
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Cache-Control", "public, max-age=300")
-		w.Write(body)
-		return
+		}, nil
 	}
 
-	article, err := a.fetchReadable(rawURL)
+	article, err := s.FetchReadable(rawURL)
 	if err != nil {
-		jsonError(w, err.Error(), http.StatusBadGateway)
-		return
+		return ArticleResponse{}, err
 	}
 
 	publishedTime := ""
@@ -85,23 +57,14 @@ func (a *App) articleHandler(w http.ResponseWriter, r *http.Request) {
 		PublishedTime: publishedTime,
 		WordCount:     len(strings.Fields(article.TextContent)),
 	}
-	body, err := json.Marshal(resp)
-	if err != nil {
-		jsonError(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-
-	go a.archiveArticle(rawURL, article.Title, article.Byline, article.SiteName, publishedTime, article.Content, article.TextContent)
-
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "public, max-age=300")
-	w.Write(body)
+	go s.ArchiveArticle(rawURL, article.Title, article.Byline, article.SiteName, publishedTime, article.Content, article.TextContent)
+	return resp, nil
 }
 
-func (a *App) archiveArticle(key, title, author, siteName, createdAt, htmlContent, textContent string) {
+func (s *Service) ArchiveArticle(key, title, author, siteName, createdAt, htmlContent, textContent string) {
 	ctx := context.Background()
 	log.Printf("article archived: %s", key)
-	if err := a.q.UpsertArticleArchive(ctx, db.UpsertArticleArchiveParams{
+	if err := s.q.UpsertArticleArchive(ctx, db.UpsertArticleArchiveParams{
 		Key:         key,
 		Title:       title,
 		Author:      author,
@@ -116,9 +79,9 @@ func (a *App) archiveArticle(key, title, author, siteName, createdAt, htmlConten
 
 const archivePruneTargetBytes = 90 * 1024 * 1024 // 90 MB - prune down to this
 
-func (a *App) pruneArticleArchive() {
+func (s *Service) PruneArticleArchive() {
 	ctx := context.Background()
-	size, err := a.q.GetArticleArchiveTotalSize(ctx)
+	size, err := s.q.GetArticleArchiveTotalSize(ctx)
 	if err != nil {
 		log.Printf("article archive size check error: %v", err)
 		return
@@ -129,18 +92,18 @@ func (a *App) pruneArticleArchive() {
 	log.Printf("article archive size %d bytes exceeds target, pruning oldest articles", size)
 	deleted := 0
 	for size > archivePruneTargetBytes {
-		article, err := a.q.GetOldestArticleArchiveKey(ctx)
+		article, err := s.q.GetOldestArticleArchiveKey(ctx)
 		if err != nil {
 			log.Printf("article archive prune error: %v", err)
 			return
 		}
-		if err := a.q.DeleteOldestArticleArchiveRow(ctx); err != nil {
+		if err := s.q.DeleteOldestArticleArchiveRow(ctx); err != nil {
 			log.Printf("article archive delete error: %v", err)
 			return
 		}
 		deleted++
 		log.Printf("article archive deleted: %s (%s)", article.Key, article.Title)
-		size, err = a.q.GetArticleArchiveTotalSize(ctx)
+		size, err = s.q.GetArticleArchiveTotalSize(ctx)
 		if err != nil {
 			log.Printf("article archive size check error: %v", err)
 			return
@@ -149,19 +112,19 @@ func (a *App) pruneArticleArchive() {
 	log.Printf("article archive pruned %d rows, size now %d bytes", deleted, size)
 }
 
-func (a *App) startArticleArchivePruner() {
+func (s *Service) StartArticleArchivePruner() {
 	go func() {
-		a.pruneArticleArchive() // run once at startup
+		s.PruneArticleArchive() // run once at startup
 		ticker := time.NewTicker(1 * time.Hour)
 		defer ticker.Stop()
 		for range ticker.C {
-			a.pruneArticleArchive()
+			s.PruneArticleArchive()
 		}
 	}()
 }
 
-// articleMetaHTML returns an HTML snippet with article metadata.
-func articleMetaHTML(article readability.Article) string {
+// ArticleMeta returns an HTML snippet with article metadata.
+func ArticleMeta(article readability.Article) string {
 	var sb strings.Builder
 
 	// "author @ sitename" line
@@ -196,9 +159,9 @@ func articleMetaHTML(article readability.Article) string {
 	return sb.String()
 }
 
-// fetchReadable fetches a URL and runs Mozilla Readability on the response.
-func (a *App) fetchReadable(rawURL string) (readability.Article, error) {
-	client := a.newScrappingClient(ScrappingClientConfig{Timeout: 30 * time.Second, WithProxy: true, UseProxyFirst: true})
+// FetchReadable fetches a URL and runs Mozilla Readability on the response.
+func (s *Service) FetchReadable(rawURL string) (readability.Article, error) {
+	client := s.newClient(ScrappingClientConfig{Timeout: 30 * time.Second, WithProxy: true, UseProxyFirst: true})
 	req, err := http.NewRequest("GET", rawURL, nil)
 	if err != nil {
 		return readability.Article{}, err
@@ -217,19 +180,37 @@ func (a *App) fetchReadable(rawURL string) (readability.Article, error) {
 	return article, nil
 }
 
+var (
+	imgTagRe = regexp.MustCompile(`(?i)<img\s[^>]*>`)
+	imgSrcRe = regexp.MustCompile(`(?i)\bsrc="([^"]*)"`)
+)
+
+// ResponsiveVariantKey returns a normalized key identifying a responsive image
+// variant, or "" if the URL carries no responsive marker (so it never
+// participates in dedup). It strips the "desktop"/"mobile" tokens so the two
+// variants of the same figure collapse to the same key. Shared with the MOBI
+// image-embedding path in the export package.
+func ResponsiveVariantKey(u string) string {
+	lower := strings.ToLower(u)
+	if !strings.Contains(lower, "desktop") && !strings.Contains(lower, "mobile") {
+		return ""
+	}
+	return strings.NewReplacer("desktop", "", "mobile", "").Replace(lower)
+}
+
 // dedupeResponsiveImages removes duplicate responsive <img> variants (keeping
 // the first) from extracted article HTML. Sites like Quanta ship separate
 // "Desktop" and "Mobile" copies of the same figure that CSS media queries hide;
 // without CSS both would render, so collapse variants that differ only by the
-// desktop/mobile token. Shares responsiveVariantKey with the MOBI image path.
+// desktop/mobile token.
 func dedupeResponsiveImages(htmlContent string) string {
 	seen := map[string]bool{}
-	return mobiImgTagRe.ReplaceAllStringFunc(htmlContent, func(imgTag string) string {
-		m := mobiSrcAttr.FindStringSubmatch(imgTag)
+	return imgTagRe.ReplaceAllStringFunc(htmlContent, func(imgTag string) string {
+		m := imgSrcRe.FindStringSubmatch(imgTag)
 		if len(m) < 2 {
 			return imgTag
 		}
-		key := responsiveVariantKey(m[1])
+		key := ResponsiveVariantKey(m[1])
 		if key == "" {
 			return imgTag
 		}

@@ -117,9 +117,9 @@ func userContext(userID int64) context.Context {
 // exercises the network code paths without hitting the internet.
 func setProxyURL(t *testing.T, url string) {
 	t.Helper()
-	prev := app.proxyURL
-	app.proxyURL = url
-	t.Cleanup(func() { app.proxyURL = prev })
+	prev := app.content.ProxyURL
+	app.content.ProxyURL = url
+	t.Cleanup(func() { app.content.ProxyURL = prev })
 }
 
 // newTestServer is a thin wrapper around httptest.NewServer registered for

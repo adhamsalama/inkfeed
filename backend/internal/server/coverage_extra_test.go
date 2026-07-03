@@ -90,50 +90,6 @@ const articleWithHeadings = `<!DOCTYPE html><html><head><title>Big Article</titl
 <p>` + longParagraph + `</p>
 </article></body></html>`
 
-func TestFromGofeedRedditAndComments(t *testing.T) {
-	// Atom feed whose entry links to reddit -> comments get /.json appended.
-	atom := `<?xml version="1.0" encoding="utf-8"?>
-<feed xmlns="http://www.w3.org/2005/Atom">
-  <title>Reddit Atom</title>
-  <entry>
-    <title>Reddit Entry</title>
-    <link href="https://reddit.com/r/x/comments/abc"/>
-    <summary>s</summary>
-    <published>2020-01-02T15:04:05Z</published>
-  </entry>
-</feed>`
-	resp, err := parseFeed("https://x", []byte(atom))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(resp.Articles) != 1 {
-		t.Fatalf("articles = %d", len(resp.Articles))
-	}
-	if resp.Articles[0].Comments != "https://reddit.com/r/x/comments/abc/.json" {
-		t.Errorf("comments = %q", resp.Articles[0].Comments)
-	}
-}
-
-func TestFetchCommentsHTMLRedditAndLobsters(t *testing.T) {
-	// Reddit routing
-	srvR := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`[{"data":{"children":[]}},{"data":{"children":[{"kind":"t1","data":{"author":"u","body_html":"c","created_utc":1}}]}}]`))
-	})
-	setProxyURL(t, srvR.URL)
-	if !strings.Contains(app.fetchCommentsHTML("https://reddit.com/x/.json"), "u") {
-		t.Error("reddit routing failed")
-	}
-
-	// Lobsters routing
-	srvL := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`{"comments":[{"short_id":"a","comment":"hi","commenting_user":"lob","created_at":"2024-01-01T00:00:00Z"}]}`))
-	})
-	setProxyURL(t, srvL.URL)
-	if !strings.Contains(app.fetchCommentsHTML("https://lobste.rs/s/abc/title"), "lob") {
-		t.Error("lobsters routing failed")
-	}
-}
-
 // TestDecodeWebPVP8XContainer wraps the VP8L chunk of a simple WebP in a VP8X
 // extended container. When the standard decoder rejects it, decodeWebP's manual
 // RIFF walker takes over.

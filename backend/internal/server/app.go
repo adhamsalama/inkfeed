@@ -8,11 +8,9 @@ import (
 	"time"
 
 	"github.com/adhamsalama/inkfeed-backend/db"
+	"github.com/adhamsalama/inkfeed-backend/internal/content"
 	"github.com/adhamsalama/inkfeed-backend/internal/email"
 )
-
-// userAgent is sent on every outbound scraping/image request.
-const userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 
 // defaultAllowedOrigins and defaultProxyURL are the baseline configuration,
 // overridable via environment variables (see App.applyEnvConfig).
@@ -25,12 +23,12 @@ const defaultProxyURL = "https://throbbing-morning-e187.adhamsalama.workers.dev"
 // globals — this makes the components independently testable and would let the
 // package be split into sub-packages later.
 type App struct {
-	q      *db.Queries
-	cache  *responseCache
-	sender email.Sender
+	q       *db.Queries
+	cache   *responseCache
+	sender  email.Sender
+	content *content.Service
 
 	allowedOrigins []string
-	proxyURL       string
 
 	// Rate limiting.
 	rlMu         sync.Mutex
@@ -50,12 +48,14 @@ type App struct {
 // newApp builds an App with default configuration wired to the given queries,
 // then applies rate-limit overrides from the environment.
 func newApp(q *db.Queries) *App {
+	svc := content.New(q)
+	svc.ProxyURL = defaultProxyURL
 	a := &App{
 		q:              q,
 		cache:          &responseCache{entries: make(map[string]cacheEntry)},
 		sender:         email.NewSender(),
+		content:        svc,
 		allowedOrigins: append([]string(nil), defaultAllowedOrigins...),
-		proxyURL:       defaultProxyURL,
 		rlHits:         make(map[string][]time.Time),
 		emailRlHits:    make(map[string]time.Time),
 		rlMax:          40,
@@ -112,6 +112,6 @@ func (a *App) applyEnvConfig() {
 		a.allowedOrigins = append(a.allowedOrigins, "http://localhost:8000")
 	}
 	if v := os.Getenv("FEED_PROXY_URL"); v != "" {
-		a.proxyURL = v
+		a.content.ProxyURL = v
 	}
 }
