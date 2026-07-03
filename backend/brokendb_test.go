@@ -20,9 +20,9 @@ func withBrokenDB(t *testing.T) func() {
 		t.Fatal(err)
 	}
 	bad.Close() // closed -> all queries error
-	prev := queries
-	queries = db.New(bad)
-	return func() { queries = prev }
+	prev := app.q
+	app.q = db.New(bad)
+	return func() { app.q = prev }
 }
 
 func TestHandlersWithBrokenDB(t *testing.T) {
@@ -37,51 +37,51 @@ func TestHandlersWithBrokenDB(t *testing.T) {
 		{
 			"signup",
 			func() *http.Request { return postJSON("/signup", `{"email":"b@y.com","password":"Abcdefgh1!"}`) },
-			signupHandler, http.StatusConflict, // CreateUser fails -> treated as conflict
+			app.signupHandler, http.StatusConflict, // CreateUser fails -> treated as conflict
 		},
 		{
 			"signin",
 			func() *http.Request { return postJSON("/signin", `{"email":"b@y.com","password":"Abcdefgh1!"}`) },
-			signinHandler, http.StatusInternalServerError,
+			app.signinHandler, http.StatusInternalServerError,
 		},
 		{
 			"changePassword",
 			func() *http.Request {
 				return postJSON("/change-password", `{"currentPassword":"Abcdefgh1!","newPassword":"NewPass123!","confirmPassword":"NewPass123!"}`).WithContext(userContext(uid))
 			},
-			changePasswordHandler, http.StatusInternalServerError,
+			app.changePasswordHandler, http.StatusInternalServerError,
 		},
 		{
 			"getPreferences",
 			func() *http.Request {
 				return httptest.NewRequest(http.MethodGet, "/preferences", nil).WithContext(userContext(uid))
 			},
-			preferencesHandler, http.StatusInternalServerError,
+			app.preferencesHandler, http.StatusInternalServerError,
 		},
 		{
 			"putPreferences",
 			func() *http.Request { return putJSON("/preferences", `{"fontSize":1}`, uid) },
-			preferencesHandler, http.StatusInternalServerError,
+			app.preferencesHandler, http.StatusInternalServerError,
 		},
 		{
 			"savedFeeds",
 			func() *http.Request { return putJSON("/saved-feeds", `[{"url":"u","title":"t"}]`, uid) },
-			savedFeedsHandler, http.StatusInternalServerError,
+			app.savedFeedsHandler, http.StatusInternalServerError,
 		},
 		{
 			"feedGroups",
 			func() *http.Request { return putJSON("/feed-groups", `[{"name":"g","feeds":[]}]`, uid) },
-			feedGroupsHandler, http.StatusInternalServerError,
+			app.feedGroupsHandler, http.StatusInternalServerError,
 		},
 		{
 			"favorites",
 			func() *http.Request { return putJSON("/favorites", `[{"url":"u","title":"t"}]`, uid) },
-			favoritesHandler, http.StatusInternalServerError,
+			app.favoritesHandler, http.StatusInternalServerError,
 		},
 		{
 			"feedArchive",
 			func() *http.Request { return httptest.NewRequest(http.MethodGet, "/feed-archive?url=feed", nil) },
-			feedArchiveHandler, http.StatusInternalServerError,
+			app.feedArchiveHandler, http.StatusInternalServerError,
 		},
 	}
 
@@ -104,7 +104,7 @@ func TestArticleHandlerArchiveWriteWithBrokenDB(t *testing.T) {
 	restore := withBrokenDB(t)
 	defer restore()
 	w := httptest.NewRecorder()
-	articleHandler(w, httptest.NewRequest(http.MethodGet, "/article?url=https://example.com/broken", nil))
+	app.articleHandler(w, httptest.NewRequest(http.MethodGet, "/article?url=https://example.com/broken", nil))
 	// Fetch still succeeds; the background archive write fails silently.
 	if w.Code != http.StatusOK {
 		t.Errorf("code = %d", w.Code)
@@ -114,10 +114,10 @@ func TestArticleHandlerArchiveWriteWithBrokenDB(t *testing.T) {
 func TestPruneWithBrokenDB(t *testing.T) {
 	restore := withBrokenDB(t)
 	defer restore()
-	pruneArticleArchive() // size query fails -> logs and returns
-	pruneFeedItems()      // delete fails -> logs and returns
-	scrapeAllFeeds()      // GetDistinctSavedFeedURLs fails -> logs and returns
-	if pollContentArchive() {
+	app.pruneArticleArchive() // size query fails -> logs and returns
+	app.pruneFeedItems()      // delete fails -> logs and returns
+	app.scrapeAllFeeds()      // GetDistinctSavedFeedURLs fails -> logs and returns
+	if app.pollContentArchive() {
 		t.Error("pollContentArchive should return false on query error")
 	}
 }

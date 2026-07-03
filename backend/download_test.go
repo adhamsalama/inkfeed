@@ -255,21 +255,21 @@ func TestPatchMobiTOCFilepos(t *testing.T) {
 func TestMobiHandler(t *testing.T) {
 	// wrong method
 	w := httptest.NewRecorder()
-	mobiHandler(w, httptest.NewRequest(http.MethodGet, "/mobi", nil))
+	app.mobiHandler(w, httptest.NewRequest(http.MethodGet, "/mobi", nil))
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Errorf("GET = %d", w.Code)
 	}
 
 	// bad body
 	w = httptest.NewRecorder()
-	mobiHandler(w, postJSON("/mobi", `{bad`))
+	app.mobiHandler(w, postJSON("/mobi", `{bad`))
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("bad body = %d", w.Code)
 	}
 
 	// neither url nor urls
 	w = httptest.NewRecorder()
-	mobiHandler(w, postJSON("/mobi", `{}`))
+	app.mobiHandler(w, postJSON("/mobi", `{}`))
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("no url = %d", w.Code)
 	}
@@ -277,7 +277,7 @@ func TestMobiHandler(t *testing.T) {
 	// single url
 	serveArticleViaProxy(t, articleHTML)
 	w = httptest.NewRecorder()
-	mobiHandler(w, postJSON("/mobi", `{"url":"https://example.com/m1","title":"My MOBI","embedImages":false}`))
+	app.mobiHandler(w, postJSON("/mobi", `{"url":"https://example.com/m1","title":"My MOBI","embedImages":false}`))
 	if w.Code != http.StatusOK {
 		t.Fatalf("single mobi = %d body=%s", w.Code, w.Body.String())
 	}
@@ -287,7 +287,7 @@ func TestMobiHandler(t *testing.T) {
 
 	// multiple urls
 	w = httptest.NewRecorder()
-	mobiHandler(w, postJSON("/mobi", `{"urls":["https://example.com/a","https://example.com/b"],"title":"Bundle","embedImages":false}`))
+	app.mobiHandler(w, postJSON("/mobi", `{"urls":["https://example.com/a","https://example.com/b"],"title":"Bundle","embedImages":false}`))
 	if w.Code != http.StatusOK {
 		t.Errorf("multi mobi = %d", w.Code)
 	}
@@ -295,7 +295,7 @@ func TestMobiHandler(t *testing.T) {
 
 func TestFetchAndCombine(t *testing.T) {
 	serveArticleViaProxy(t, articleHTML)
-	out := fetchAndCombine([]string{"https://example.com/1", "https://example.com/2"}, "Feed Title")
+	out := app.fetchAndCombine([]string{"https://example.com/1", "https://example.com/2"}, "Feed Title")
 	if !strings.Contains(out, "Feed Title") || !strings.Contains(out, "Contents") {
 		t.Errorf("combined output missing header/toc")
 	}

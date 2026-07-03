@@ -8,12 +8,12 @@ import (
 )
 
 func TestCachedMissThenHit(t *testing.T) {
-	globalCache.mu.Lock()
-	globalCache.entries = map[string]cacheEntry{}
-	globalCache.mu.Unlock()
+	app.cache.mu.Lock()
+	app.cache.entries = map[string]cacheEntry{}
+	app.cache.mu.Unlock()
 
 	calls := 0
-	handler := cached(func(w http.ResponseWriter, r *http.Request) {
+	handler := app.cached(func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"ok":true}`))
@@ -45,12 +45,12 @@ func TestCachedMissThenHit(t *testing.T) {
 }
 
 func TestCachedDoesNotCacheErrors(t *testing.T) {
-	globalCache.mu.Lock()
-	globalCache.entries = map[string]cacheEntry{}
-	globalCache.mu.Unlock()
+	app.cache.mu.Lock()
+	app.cache.entries = map[string]cacheEntry{}
+	app.cache.mu.Unlock()
 
 	calls := 0
-	handler := cached(func(w http.ResponseWriter, r *http.Request) {
+	handler := app.cached(func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		w.WriteHeader(http.StatusBadGateway)
 		w.Write([]byte("err"))
@@ -84,26 +84,26 @@ func TestResponseRecorder(t *testing.T) {
 func TestStartCacheCleanup(t *testing.T) {
 	// Insert an already-expired entry, then confirm the cleanup logic removes it.
 	// We call the cleanup body directly rather than wait 5 minutes.
-	globalCache.mu.Lock()
-	globalCache.entries = map[string]cacheEntry{
+	app.cache.mu.Lock()
+	app.cache.entries = map[string]cacheEntry{
 		"expired": {expiresAt: time.Now().Add(-time.Minute)},
 		"fresh":   {expiresAt: time.Now().Add(time.Minute)},
 	}
-	globalCache.mu.Unlock()
+	app.cache.mu.Unlock()
 
 	// startCacheCleanup only spawns a goroutine; exercise it for coverage.
-	startCacheCleanup()
+	app.startCacheCleanup()
 
 	now := time.Now()
-	globalCache.mu.Lock()
-	for k, e := range globalCache.entries {
+	app.cache.mu.Lock()
+	for k, e := range app.cache.entries {
 		if now.After(e.expiresAt) {
-			delete(globalCache.entries, k)
+			delete(app.cache.entries, k)
 		}
 	}
-	_, expiredStillThere := globalCache.entries["expired"]
-	_, freshThere := globalCache.entries["fresh"]
-	globalCache.mu.Unlock()
+	_, expiredStillThere := app.cache.entries["expired"]
+	_, freshThere := app.cache.entries["fresh"]
+	app.cache.mu.Unlock()
 
 	if expiredStillThere {
 		t.Errorf("expired entry not cleaned")

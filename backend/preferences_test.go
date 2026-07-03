@@ -38,7 +38,7 @@ func TestPreferencesHandlerRoundTrip(t *testing.T) {
 	// GET with no preferences yet -> defaults (embed images true)
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/preferences", nil).WithContext(userContext(uid))
-	preferencesHandler(w, req)
+	app.preferencesHandler(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("GET prefs = %d", w.Code)
 	}
@@ -51,14 +51,14 @@ func TestPreferencesHandlerRoundTrip(t *testing.T) {
 	// PUT preferences
 	body := `{"fontSize":1.5,"letterSpacing":0.2,"lineHeight":1.6,"corsProxyUrl":"http://p","epubEmbedImages":false,"mobiEmbedImages":true,"emailTo":"k@x.com","fontFamily":"serif","boldText":true,"darkMode":true}`
 	w = httptest.NewRecorder()
-	preferencesHandler(w, putJSON("/preferences", body, uid))
+	app.preferencesHandler(w, putJSON("/preferences", body, uid))
 	if w.Code != http.StatusNoContent {
 		t.Fatalf("PUT prefs = %d", w.Code)
 	}
 
 	// GET reflects saved values
 	w = httptest.NewRecorder()
-	preferencesHandler(w, httptest.NewRequest(http.MethodGet, "/preferences", nil).WithContext(userContext(uid)))
+	app.preferencesHandler(w, httptest.NewRequest(http.MethodGet, "/preferences", nil).WithContext(userContext(uid)))
 	json.Unmarshal(w.Body.Bytes(), &resp)
 	if resp.FontSize != 1.5 || resp.EmailTo != "k@x.com" || resp.EpubEmbedImages || !resp.DarkMode {
 		t.Errorf("saved prefs wrong: %+v", resp)
@@ -66,14 +66,14 @@ func TestPreferencesHandlerRoundTrip(t *testing.T) {
 
 	// PUT bad JSON
 	w = httptest.NewRecorder()
-	preferencesHandler(w, putJSON("/preferences", `{bad`, uid))
+	app.preferencesHandler(w, putJSON("/preferences", `{bad`, uid))
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("bad PUT = %d", w.Code)
 	}
 
 	// Unsupported method
 	w = httptest.NewRecorder()
-	preferencesHandler(w, httptest.NewRequest(http.MethodDelete, "/preferences", nil).WithContext(userContext(uid)))
+	app.preferencesHandler(w, httptest.NewRequest(http.MethodDelete, "/preferences", nil).WithContext(userContext(uid)))
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Errorf("DELETE = %d", w.Code)
 	}
@@ -85,25 +85,25 @@ func TestSavedFeedsHandler(t *testing.T) {
 
 	// wrong method
 	w := httptest.NewRecorder()
-	savedFeedsHandler(w, httptest.NewRequest(http.MethodGet, "/saved-feeds", nil).WithContext(userContext(uid)))
+	app.savedFeedsHandler(w, httptest.NewRequest(http.MethodGet, "/saved-feeds", nil).WithContext(userContext(uid)))
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Errorf("GET = %d", w.Code)
 	}
 
 	// bad json
 	w = httptest.NewRecorder()
-	savedFeedsHandler(w, putJSON("/saved-feeds", `{bad`, uid))
+	app.savedFeedsHandler(w, putJSON("/saved-feeds", `{bad`, uid))
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("bad json = %d", w.Code)
 	}
 
 	// valid
 	w = httptest.NewRecorder()
-	savedFeedsHandler(w, putJSON("/saved-feeds", `[{"url":"u1","title":"T1","archiveEnabled":true},{"url":"u2","title":"T2"}]`, uid))
+	app.savedFeedsHandler(w, putJSON("/saved-feeds", `[{"url":"u1","title":"T1","archiveEnabled":true},{"url":"u2","title":"T2"}]`, uid))
 	if w.Code != http.StatusNoContent {
 		t.Fatalf("PUT = %d", w.Code)
 	}
-	feeds, _ := queries.GetUserSavedFeeds(userContext(uid), uid)
+	feeds, _ := app.q.GetUserSavedFeeds(userContext(uid), uid)
 	if len(feeds) != 2 {
 		t.Errorf("saved feeds = %d", len(feeds))
 	}
@@ -112,7 +112,7 @@ func TestSavedFeedsHandler(t *testing.T) {
 	os.Setenv("MAX_ARCHIVED_FEEDS", "1")
 	defer os.Unsetenv("MAX_ARCHIVED_FEEDS")
 	w = httptest.NewRecorder()
-	savedFeedsHandler(w, putJSON("/saved-feeds", `[{"url":"a","title":"A","archiveEnabled":true},{"url":"b","title":"B","archiveEnabled":true}]`, uid))
+	app.savedFeedsHandler(w, putJSON("/saved-feeds", `[{"url":"a","title":"A","archiveEnabled":true},{"url":"b","title":"B","archiveEnabled":true}]`, uid))
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("over limit = %d", w.Code)
 	}
@@ -123,23 +123,23 @@ func TestFeedGroupsHandler(t *testing.T) {
 	uid := createTestUser(t, "fg@y.com")
 
 	w := httptest.NewRecorder()
-	feedGroupsHandler(w, httptest.NewRequest(http.MethodGet, "/feed-groups", nil).WithContext(userContext(uid)))
+	app.feedGroupsHandler(w, httptest.NewRequest(http.MethodGet, "/feed-groups", nil).WithContext(userContext(uid)))
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Errorf("GET = %d", w.Code)
 	}
 
 	w = httptest.NewRecorder()
-	feedGroupsHandler(w, putJSON("/feed-groups", `{bad`, uid))
+	app.feedGroupsHandler(w, putJSON("/feed-groups", `{bad`, uid))
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("bad json = %d", w.Code)
 	}
 
 	w = httptest.NewRecorder()
-	feedGroupsHandler(w, putJSON("/feed-groups", `[{"name":"G1","feeds":[{"url":"u","title":"t"}]}]`, uid))
+	app.feedGroupsHandler(w, putJSON("/feed-groups", `[{"name":"G1","feeds":[{"url":"u","title":"t"}]}]`, uid))
 	if w.Code != http.StatusNoContent {
 		t.Fatalf("PUT = %d", w.Code)
 	}
-	groups, _ := queries.GetUserFeedGroups(userContext(uid), uid)
+	groups, _ := app.q.GetUserFeedGroups(userContext(uid), uid)
 	if len(groups) != 1 {
 		t.Errorf("groups = %d", len(groups))
 	}
@@ -150,23 +150,23 @@ func TestFavoritesHandler(t *testing.T) {
 	uid := createTestUser(t, "favs@y.com")
 
 	w := httptest.NewRecorder()
-	favoritesHandler(w, httptest.NewRequest(http.MethodGet, "/favorites", nil).WithContext(userContext(uid)))
+	app.favoritesHandler(w, httptest.NewRequest(http.MethodGet, "/favorites", nil).WithContext(userContext(uid)))
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Errorf("GET = %d", w.Code)
 	}
 
 	w = httptest.NewRecorder()
-	favoritesHandler(w, putJSON("/favorites", `{bad`, uid))
+	app.favoritesHandler(w, putJSON("/favorites", `{bad`, uid))
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("bad json = %d", w.Code)
 	}
 
 	w = httptest.NewRecorder()
-	favoritesHandler(w, putJSON("/favorites", `[{"url":"u","title":"t","feedTitle":"ft","pubDate":"pd","commentsUrl":"cu"}]`, uid))
+	app.favoritesHandler(w, putJSON("/favorites", `[{"url":"u","title":"t","feedTitle":"ft","pubDate":"pd","commentsUrl":"cu"}]`, uid))
 	if w.Code != http.StatusNoContent {
 		t.Fatalf("PUT = %d", w.Code)
 	}
-	favs, _ := queries.GetUserFavorites(userContext(uid), uid)
+	favs, _ := app.q.GetUserFavorites(userContext(uid), uid)
 	if len(favs) != 1 {
 		t.Errorf("favs = %d", len(favs))
 	}
@@ -177,14 +177,14 @@ func TestSignoutHandler(t *testing.T) {
 
 	// wrong method
 	w := httptest.NewRecorder()
-	signoutHandler(w, httptest.NewRequest(http.MethodGet, "/signout", nil))
+	app.signoutHandler(w, httptest.NewRequest(http.MethodGet, "/signout", nil))
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Errorf("GET = %d", w.Code)
 	}
 
 	// no cookie -> still clears
 	w = httptest.NewRecorder()
-	signoutHandler(w, httptest.NewRequest(http.MethodPost, "/signout", nil))
+	app.signoutHandler(w, httptest.NewRequest(http.MethodPost, "/signout", nil))
 	if w.Code != http.StatusNoContent {
 		t.Errorf("no cookie signout = %d", w.Code)
 	}
@@ -192,16 +192,16 @@ func TestSignoutHandler(t *testing.T) {
 	// with cookie
 	uid := createTestUser(t, "so@y.com")
 	iw := httptest.NewRecorder()
-	issueSession(iw, httptest.NewRequest(http.MethodPost, "/signout", nil), uid)
+	app.issueSession(iw, httptest.NewRequest(http.MethodPost, "/signout", nil), uid)
 	cookie := iw.Result().Cookies()[0]
 	w = httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/signout", nil)
 	req.AddCookie(cookie)
-	signoutHandler(w, req)
+	app.signoutHandler(w, req)
 	if w.Code != http.StatusNoContent {
 		t.Errorf("signout = %d", w.Code)
 	}
-	if _, err := queries.GetSession(userContext(uid), cookie.Value); err == nil {
+	if _, err := app.q.GetSession(userContext(uid), cookie.Value); err == nil {
 		t.Errorf("session should be deleted")
 	}
 }

@@ -9,20 +9,20 @@ import (
 )
 
 func TestIsAllowedOrigin(t *testing.T) {
-	if !isAllowedOrigin("https://reader.inkfeed.xyz") {
+	if !app.isAllowedOrigin("https://reader.inkfeed.xyz") {
 		t.Error("prod origin should be allowed")
 	}
-	if isAllowedOrigin("https://evil.com") {
+	if app.isAllowedOrigin("https://evil.com") {
 		t.Error("unknown origin should be rejected")
 	}
-	if isAllowedOrigin("") {
+	if app.isAllowedOrigin("") {
 		t.Error("empty origin should be rejected")
 	}
 }
 
 func TestCorsMiddleware(t *testing.T) {
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusTeapot) })
-	h := corsMiddleware(next)
+	h := app.corsMiddleware(next)
 
 	// Disallowed origin
 	w := httptest.NewRecorder()
@@ -78,11 +78,11 @@ func TestStatusRecorder(t *testing.T) {
 }
 
 func TestApplyEnvConfig(t *testing.T) {
-	origOrigins := allowedOrigins
-	origProxy := feedProxyURL
+	origOrigins := app.allowedOrigins
+	origProxy := app.proxyURL
 	defer func() {
-		allowedOrigins = origOrigins
-		feedProxyURL = origProxy
+		app.allowedOrigins = origOrigins
+		app.proxyURL = origProxy
 	}()
 
 	os.Setenv("ALLOWED_ORIGINS", "https://a.com,https://b.com")
@@ -94,12 +94,12 @@ func TestApplyEnvConfig(t *testing.T) {
 		os.Unsetenv("FEED_PROXY_URL")
 	}()
 
-	applyEnvConfig()
-	if !isAllowedOrigin("https://a.com") || !isAllowedOrigin("http://localhost:8000") {
-		t.Errorf("origins not applied: %v", allowedOrigins)
+	app.applyEnvConfig()
+	if !app.isAllowedOrigin("https://a.com") || !app.isAllowedOrigin("http://localhost:8000") {
+		t.Errorf("origins not applied: %v", app.allowedOrigins)
 	}
-	if feedProxyURL != "https://proxy.test" {
-		t.Errorf("proxy = %q", feedProxyURL)
+	if app.proxyURL != "https://proxy.test" {
+		t.Errorf("proxy = %q", app.proxyURL)
 	}
 }
 
@@ -124,7 +124,7 @@ func TestSetupDB(t *testing.T) {
 }
 
 func TestNewServeMux(t *testing.T) {
-	mux := newServeMux()
+	mux := app.newServeMux()
 	// Unauthenticated request to a protected route with an allowed origin should
 	// reach authMiddleware and be rejected as unauthorized (proving routing +
 	// middleware are wired).
@@ -150,7 +150,7 @@ func TestStartBackgroundJobs(t *testing.T) {
 	resetDB(t)
 	// Just ensure it launches without panicking. The goroutines operate on the
 	// empty test DB (no saved feeds) so they are effectively no-ops.
-	startBackgroundJobs()
+	app.startBackgroundJobs()
 }
 
 func TestJSONError(t *testing.T) {

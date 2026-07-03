@@ -41,10 +41,10 @@ func TestDecodeViaAPIParseBranches(t *testing.T) {
 	defer func() { googleNewsBatchExecuteURL = orig }()
 
 	cases := []string{
-		")]}'\n\nnot-json-here",             // outer unmarshal fails
-		")]}'\n\n[[\"wrb.fr\",\"Fbv4je\"]]", // row has <3 elements
-		")]}'\n\n[[\"wrb.fr\",\"Fbv4je\",123]]",     // row[2] not a string
-		")]}'\n\n[[\"wrb.fr\",\"Fbv4je\",\"[]\"]]",  // inner array too short
+		")]}'\n\nnot-json-here",                                 // outer unmarshal fails
+		")]}'\n\n[[\"wrb.fr\",\"Fbv4je\"]]",                     // row has <3 elements
+		")]}'\n\n[[\"wrb.fr\",\"Fbv4je\",123]]",                 // row[2] not a string
+		")]}'\n\n[[\"wrb.fr\",\"Fbv4je\",\"[]\"]]",              // inner array too short
 		")]}'\n\n[[\"wrb.fr\",\"Fbv4je\",\"[\\\"x\\\",123]\"]]", // inner[1] not a string
 	}
 	for i, resp := range cases {

@@ -145,7 +145,7 @@ func TestGenerateEpub(t *testing.T) {
 
 func TestBuildEpubMultiArticleBody(t *testing.T) {
 	serveArticleViaProxy(t, articleHTML)
-	body := buildEpubMultiArticleBody([]string{"https://example.com/1", "https://example.com/2"}, "Feed")
+	body := app.buildEpubMultiArticleBody([]string{"https://example.com/1", "https://example.com/2"}, "Feed")
 	if !strings.Contains(body, "Feed") || !strings.Contains(body, "Contents") {
 		t.Errorf("multi body missing header/toc")
 	}
@@ -157,19 +157,19 @@ func TestBuildEpubMultiArticleBody(t *testing.T) {
 func TestEpubHandler(t *testing.T) {
 	// wrong method
 	w := httptest.NewRecorder()
-	epubHandler(w, httptest.NewRequest(http.MethodGet, "/epub", nil))
+	app.epubHandler(w, httptest.NewRequest(http.MethodGet, "/epub", nil))
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Errorf("GET = %d", w.Code)
 	}
 	// bad body
 	w = httptest.NewRecorder()
-	epubHandler(w, postJSON("/epub", `{bad`))
+	app.epubHandler(w, postJSON("/epub", `{bad`))
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("bad body = %d", w.Code)
 	}
 	// no url
 	w = httptest.NewRecorder()
-	epubHandler(w, postJSON("/epub", `{}`))
+	app.epubHandler(w, postJSON("/epub", `{}`))
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("no url = %d", w.Code)
 	}
@@ -177,7 +177,7 @@ func TestEpubHandler(t *testing.T) {
 	serveArticleViaProxy(t, articleHTML)
 	// single
 	w = httptest.NewRecorder()
-	epubHandler(w, postJSON("/epub", `{"url":"https://example.com/e1","title":"E","embedImages":false}`))
+	app.epubHandler(w, postJSON("/epub", `{"url":"https://example.com/e1","title":"E","embedImages":false}`))
 	if w.Code != http.StatusOK {
 		t.Fatalf("single epub = %d body=%s", w.Code, w.Body.String())
 	}
@@ -186,7 +186,7 @@ func TestEpubHandler(t *testing.T) {
 	}
 	// multi
 	w = httptest.NewRecorder()
-	epubHandler(w, postJSON("/epub", `{"urls":["https://example.com/a","https://example.com/b"],"title":"Bundle","embedImages":false}`))
+	app.epubHandler(w, postJSON("/epub", `{"urls":["https://example.com/a","https://example.com/b"],"title":"Bundle","embedImages":false}`))
 	if w.Code != http.StatusOK {
 		t.Errorf("multi epub = %d", w.Code)
 	}

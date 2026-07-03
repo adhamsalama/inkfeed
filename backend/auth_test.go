@@ -17,10 +17,10 @@ func TestValidatePassword(t *testing.T) {
 		wantErr bool
 	}{
 		{"Abcdefgh1!", false},
-		{"short1!", true},          // too short
-		{"abcdefghij!", true},      // no digit
-		{"abcdefghij1", true},      // no symbol
-		{"1234567890!", false},     // digits + symbol, len ok
+		{"short1!", true},      // too short
+		{"abcdefghij!", true},  // no digit
+		{"abcdefghij1", true},  // no symbol
+		{"1234567890!", false}, // digits + symbol, len ok
 		{"", true},
 	}
 	for _, c := range cases {
@@ -42,35 +42,35 @@ func TestSignupHandler(t *testing.T) {
 
 	// Wrong method
 	w := httptest.NewRecorder()
-	signupHandler(w, httptest.NewRequest(http.MethodGet, "/signup", nil))
+	app.signupHandler(w, httptest.NewRequest(http.MethodGet, "/signup", nil))
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Errorf("GET signup = %d", w.Code)
 	}
 
 	// Missing fields
 	w = httptest.NewRecorder()
-	signupHandler(w, postJSON("/signup", `{}`))
+	app.signupHandler(w, postJSON("/signup", `{}`))
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("empty signup = %d", w.Code)
 	}
 
 	// Bad JSON
 	w = httptest.NewRecorder()
-	signupHandler(w, postJSON("/signup", `{bad`))
+	app.signupHandler(w, postJSON("/signup", `{bad`))
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("bad json signup = %d", w.Code)
 	}
 
 	// Weak password
 	w = httptest.NewRecorder()
-	signupHandler(w, postJSON("/signup", `{"email":"x@y.com","password":"weak"}`))
+	app.signupHandler(w, postJSON("/signup", `{"email":"x@y.com","password":"weak"}`))
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("weak pwd signup = %d", w.Code)
 	}
 
 	// Success
 	w = httptest.NewRecorder()
-	signupHandler(w, postJSON("/signup", `{"email":"new@y.com","password":"Abcdefgh1!"}`))
+	app.signupHandler(w, postJSON("/signup", `{"email":"new@y.com","password":"Abcdefgh1!"}`))
 	if w.Code != http.StatusCreated {
 		t.Fatalf("signup = %d body=%s", w.Code, w.Body.String())
 	}
@@ -80,7 +80,7 @@ func TestSignupHandler(t *testing.T) {
 
 	// Duplicate email -> conflict
 	w = httptest.NewRecorder()
-	signupHandler(w, postJSON("/signup", `{"email":"new@y.com","password":"Abcdefgh1!"}`))
+	app.signupHandler(w, postJSON("/signup", `{"email":"new@y.com","password":"Abcdefgh1!"}`))
 	if w.Code != http.StatusConflict {
 		t.Errorf("dup signup = %d", w.Code)
 	}
@@ -89,42 +89,42 @@ func TestSignupHandler(t *testing.T) {
 func TestSigninHandler(t *testing.T) {
 	resetDB(t)
 	hash, _ := bcrypt.GenerateFromPassword([]byte("Abcdefgh1!"), bcrypt.DefaultCost)
-	_, err := queries.CreateUser(context.Background(), dbCreateUser("signin@y.com", string(hash)))
+	_, err := app.q.CreateUser(context.Background(), dbCreateUser("signin@y.com", string(hash)))
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Wrong method
 	w := httptest.NewRecorder()
-	signinHandler(w, httptest.NewRequest(http.MethodGet, "/signin", nil))
+	app.signinHandler(w, httptest.NewRequest(http.MethodGet, "/signin", nil))
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Errorf("GET signin = %d", w.Code)
 	}
 
 	// Missing fields
 	w = httptest.NewRecorder()
-	signinHandler(w, postJSON("/signin", `{}`))
+	app.signinHandler(w, postJSON("/signin", `{}`))
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("empty signin = %d", w.Code)
 	}
 
 	// Unknown user
 	w = httptest.NewRecorder()
-	signinHandler(w, postJSON("/signin", `{"email":"nope@y.com","password":"Abcdefgh1!"}`))
+	app.signinHandler(w, postJSON("/signin", `{"email":"nope@y.com","password":"Abcdefgh1!"}`))
 	if w.Code != http.StatusUnauthorized {
 		t.Errorf("unknown user signin = %d", w.Code)
 	}
 
 	// Wrong password
 	w = httptest.NewRecorder()
-	signinHandler(w, postJSON("/signin", `{"email":"signin@y.com","password":"WrongPass1!"}`))
+	app.signinHandler(w, postJSON("/signin", `{"email":"signin@y.com","password":"WrongPass1!"}`))
 	if w.Code != http.StatusUnauthorized {
 		t.Errorf("wrong pwd signin = %d", w.Code)
 	}
 
 	// Success
 	w = httptest.NewRecorder()
-	signinHandler(w, postJSON("/signin", `{"email":"signin@y.com","password":"Abcdefgh1!"}`))
+	app.signinHandler(w, postJSON("/signin", `{"email":"signin@y.com","password":"Abcdefgh1!"}`))
 	if w.Code != http.StatusOK {
 		t.Fatalf("signin = %d body=%s", w.Code, w.Body.String())
 	}
@@ -138,52 +138,52 @@ func TestSigninHandler(t *testing.T) {
 func TestChangePasswordHandler(t *testing.T) {
 	resetDB(t)
 	hash, _ := bcrypt.GenerateFromPassword([]byte("Abcdefgh1!"), bcrypt.DefaultCost)
-	u, _ := queries.CreateUser(context.Background(), dbCreateUser("chg@y.com", string(hash)))
+	u, _ := app.q.CreateUser(context.Background(), dbCreateUser("chg@y.com", string(hash)))
 	ctx := userContext(u.ID)
 
 	// Wrong method
 	w := httptest.NewRecorder()
-	changePasswordHandler(w, httptest.NewRequest(http.MethodGet, "/change-password", nil).WithContext(ctx))
+	app.changePasswordHandler(w, httptest.NewRequest(http.MethodGet, "/change-password", nil).WithContext(ctx))
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Errorf("GET = %d", w.Code)
 	}
 
 	// Missing fields
 	w = httptest.NewRecorder()
-	changePasswordHandler(w, postJSON("/change-password", `{}`).WithContext(ctx))
+	app.changePasswordHandler(w, postJSON("/change-password", `{}`).WithContext(ctx))
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("empty = %d", w.Code)
 	}
 
 	// Mismatched new passwords
 	w = httptest.NewRecorder()
-	changePasswordHandler(w, postJSON("/change-password", `{"currentPassword":"Abcdefgh1!","newPassword":"NewPass123!","confirmPassword":"Other123!"}`).WithContext(ctx))
+	app.changePasswordHandler(w, postJSON("/change-password", `{"currentPassword":"Abcdefgh1!","newPassword":"NewPass123!","confirmPassword":"Other123!"}`).WithContext(ctx))
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("mismatch = %d", w.Code)
 	}
 
 	// Weak new password
 	w = httptest.NewRecorder()
-	changePasswordHandler(w, postJSON("/change-password", `{"currentPassword":"Abcdefgh1!","newPassword":"weak","confirmPassword":"weak"}`).WithContext(ctx))
+	app.changePasswordHandler(w, postJSON("/change-password", `{"currentPassword":"Abcdefgh1!","newPassword":"weak","confirmPassword":"weak"}`).WithContext(ctx))
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("weak = %d", w.Code)
 	}
 
 	// Wrong current password
 	w = httptest.NewRecorder()
-	changePasswordHandler(w, postJSON("/change-password", `{"currentPassword":"WrongPass1!","newPassword":"NewPass123!","confirmPassword":"NewPass123!"}`).WithContext(ctx))
+	app.changePasswordHandler(w, postJSON("/change-password", `{"currentPassword":"WrongPass1!","newPassword":"NewPass123!","confirmPassword":"NewPass123!"}`).WithContext(ctx))
 	if w.Code != http.StatusUnauthorized {
 		t.Errorf("wrong current = %d", w.Code)
 	}
 
 	// Success
 	w = httptest.NewRecorder()
-	changePasswordHandler(w, postJSON("/change-password", `{"currentPassword":"Abcdefgh1!","newPassword":"NewPass123!","confirmPassword":"NewPass123!"}`).WithContext(ctx))
+	app.changePasswordHandler(w, postJSON("/change-password", `{"currentPassword":"Abcdefgh1!","newPassword":"NewPass123!","confirmPassword":"NewPass123!"}`).WithContext(ctx))
 	if w.Code != http.StatusOK {
 		t.Fatalf("change = %d body=%s", w.Code, w.Body.String())
 	}
 	// Verify new hash works
-	updated, _ := queries.GetUserByID(context.Background(), u.ID)
+	updated, _ := app.q.GetUserByID(context.Background(), u.ID)
 	if bcrypt.CompareHashAndPassword([]byte(updated.PasswordHash), []byte("NewPass123!")) != nil {
 		t.Errorf("password not actually changed")
 	}
@@ -199,7 +199,7 @@ func TestAuthMiddleware(t *testing.T) {
 		nextCalled = true
 		gotUserID = r.Context().Value(contextKey("userID")).(int64)
 	})
-	handler := authMiddleware(next)
+	handler := app.authMiddleware(next)
 
 	// No cookie
 	w := httptest.NewRecorder()
@@ -219,7 +219,7 @@ func TestAuthMiddleware(t *testing.T) {
 
 	// Valid session: issue via issueSession
 	iw := httptest.NewRecorder()
-	if err := issueSession(iw, httptest.NewRequest(http.MethodGet, "/x", nil), u); err != nil {
+	if err := app.issueSession(iw, httptest.NewRequest(http.MethodGet, "/x", nil), u); err != nil {
 		t.Fatal(err)
 	}
 	cookie := iw.Result().Cookies()[0]

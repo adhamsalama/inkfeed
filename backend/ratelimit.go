@@ -5,31 +5,11 @@ import (
 	"database/sql"
 	"net"
 	"net/http"
-	"os"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/adhamsalama/inkfeed-backend/db"
-)
-
-var (
-	rateLimitMu     sync.Mutex
-	rateLimitHits   map[string][]time.Time
-	rateLimitMax    int
-	rateLimitWindow time.Duration
-
-	emailRateLimitMu   sync.Mutex
-	emailRateLimitHits map[string]time.Time
-
-	signinRateLimitMu  sync.Mutex
-	signupRateLimitMu  sync.Mutex
-
-	signinRateLimitMax    int
-	signupRateLimitMax    int
-	authRateLimitWindow   time.Duration
-	authRateLimitBlock    time.Duration
 )
 
 func clientIP(r *http.Request) string {
@@ -46,65 +26,18 @@ func clientIP(r *http.Request) string {
 	return ip
 }
 
-func init() {
-	rateLimitHits = make(map[string][]time.Time)
-	emailRateLimitHits = make(map[string]time.Time)
-
-	rateLimitMax = 40
-	if v := os.Getenv("RATE_LIMIT_MAX"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			rateLimitMax = n
-		}
-	}
-
-	rateLimitWindow = time.Minute
-	if v := os.Getenv("RATE_LIMIT_WINDOW_SECONDS"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			rateLimitWindow = time.Duration(n) * time.Second
-		}
-	}
-
-	signinRateLimitMax = 10
-	if v := os.Getenv("SIGNIN_RATE_LIMIT_MAX"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			signinRateLimitMax = n
-		}
-	}
-
-	signupRateLimitMax = 1000
-	if v := os.Getenv("SIGNUP_RATE_LIMIT_MAX"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			signupRateLimitMax = n
-		}
-	}
-
-	authRateLimitWindow = time.Hour
-	if v := os.Getenv("AUTH_RATE_LIMIT_WINDOW_HOURS"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			authRateLimitWindow = time.Duration(n) * time.Hour
-		}
-	}
-
-	authRateLimitBlock = 2 * time.Hour
-	if v := os.Getenv("AUTH_RATE_LIMIT_BLOCK_HOURS"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			authRateLimitBlock = time.Duration(n) * time.Hour
-		}
-	}
-}
-
 // dbRateLimit checks and updates a persistent rate limit for the given IP and endpoint.
 // Returns true if the request is allowed, false if it should be blocked.
 // limit is the max requests allowed in window. blockDuration is how long to block after exceeding.
-func dbRateLimit(ctx context.Context, mu *sync.Mutex, ip, endpoint string, limit int, window, blockDuration time.Duration) bool {
+func (a *App) dbRateLimit(ctx context.Context, mu *sync.Mutex, ip, endpoint string, limit int, window, blockDuration time.Duration) bool {
 	mu.Lock()
 	defer mu.Unlock()
 
 	now := time.Now()
 
-	row, err := queries.GetIPRateLimit(ctx, db.GetIPRateLimitParams{Ip: ip, Endpoint: endpoint})
+	row, err := a.q.GetIPRateLimit(ctx, db.GetIPRateLimitParams{Ip: ip, Endpoint: endpoint})
 	if err == sql.ErrNoRows {
-		queries.UpsertIPRateLimit(ctx, db.UpsertIPRateLimitParams{
+		a.q.UpsertIPRateLimit(ctx, db.UpsertIPRateLimitParams{
 			Ip:           ip,
 			Endpoint:     endpoint,
 			Count:        1,
@@ -134,7 +67,7 @@ func dbRateLimit(ctx context.Context, mu *sync.Mutex, ip, endpoint string, limit
 	}
 
 	if count > int64(limit) {
-		queries.UpsertIPRateLimit(ctx, db.UpsertIPRateLimitParams{
+		a.q.UpsertIPRateLimit(ctx, db.UpsertIPRateLimitParams{
 			Ip:           ip,
 			Endpoint:     endpoint,
 			Count:        count,
@@ -144,7 +77,7 @@ func dbRateLimit(ctx context.Context, mu *sync.Mutex, ip, endpoint string, limit
 		return false
 	}
 
-	queries.UpsertIPRateLimit(ctx, db.UpsertIPRateLimitParams{
+	a.q.UpsertIPRateLimit(ctx, db.UpsertIPRateLimitParams{
 		Ip:           ip,
 		Endpoint:     endpoint,
 		Count:        count,
@@ -154,28 +87,28 @@ func dbRateLimit(ctx context.Context, mu *sync.Mutex, ip, endpoint string, limit
 	return true
 }
 
-func emailRateLimitMiddleware(next http.Handler) http.Handler {
+func (a *App) emailRateLimitMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ip := clientIP(r)
 
-		emailRateLimitMu.Lock()
-		last, seen := emailRateLimitHits[ip]
+		a.emailRlMu.Lock()
+		last, seen := a.emailRlHits[ip]
 		if seen && time.Since(last) < time.Minute {
-			emailRateLimitMu.Unlock()
+			a.emailRlMu.Unlock()
 			jsonError(w, "email rate limit exceeded: 1 per minute", http.StatusTooManyRequests)
 			return
 		}
-		emailRateLimitHits[ip] = time.Now()
-		emailRateLimitMu.Unlock()
+		a.emailRlHits[ip] = time.Now()
+		a.emailRlMu.Unlock()
 
 		next.ServeHTTP(w, r)
 	})
 }
 
-func signupRateLimitMiddleware(next http.Handler) http.Handler {
+func (a *App) signupRateLimitMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ip := clientIP(r)
-		if !dbRateLimit(r.Context(), &signupRateLimitMu, ip, "signup", signupRateLimitMax, authRateLimitWindow, authRateLimitBlock) {
+		if !a.dbRateLimit(r.Context(), &a.signupRlMu, ip, "signup", a.signupRlMax, a.authRlWindow, a.authRlBlock) {
 			jsonError(w, "rate limit exceeded: too many signup attempts", http.StatusTooManyRequests)
 			return
 		}
@@ -183,10 +116,10 @@ func signupRateLimitMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-func signinRateLimitMiddleware(next http.Handler) http.Handler {
+func (a *App) signinRateLimitMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ip := clientIP(r)
-		if !dbRateLimit(r.Context(), &signinRateLimitMu, ip, "signin", signinRateLimitMax, authRateLimitWindow, authRateLimitBlock) {
+		if !a.dbRateLimit(r.Context(), &a.signinRlMu, ip, "signin", a.signinRlMax, a.authRlWindow, a.authRlBlock) {
 			jsonError(w, "rate limit exceeded: too many signin attempts", http.StatusTooManyRequests)
 			return
 		}
@@ -194,28 +127,28 @@ func signinRateLimitMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-func rateLimitMiddleware(next http.Handler) http.Handler {
+func (a *App) rateLimitMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ip := clientIP(r)
 
-		rateLimitMu.Lock()
+		a.rlMu.Lock()
 		now := time.Now()
-		cutoff := now.Add(-rateLimitWindow)
-		hits := rateLimitHits[ip]
+		cutoff := now.Add(-a.rlWindow)
+		hits := a.rlHits[ip]
 		filtered := hits[:0]
 		for _, t := range hits {
 			if t.After(cutoff) {
 				filtered = append(filtered, t)
 			}
 		}
-		rateLimitHits[ip] = filtered
-		if len(filtered) >= rateLimitMax {
-			rateLimitMu.Unlock()
+		a.rlHits[ip] = filtered
+		if len(filtered) >= a.rlMax {
+			a.rlMu.Unlock()
 			jsonError(w, "rate limit exceeded", http.StatusTooManyRequests)
 			return
 		}
-		rateLimitHits[ip] = append(filtered, now)
-		rateLimitMu.Unlock()
+		a.rlHits[ip] = append(filtered, now)
+		a.rlMu.Unlock()
 
 		next.ServeHTTP(w, r)
 	})

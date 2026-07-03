@@ -15,7 +15,7 @@ func mustParseURL(s string) *url.URL {
 
 func TestNewScrappingClient(t *testing.T) {
 	setProxyURL(t, "http://proxy.example")
-	c := newScrappingClient(ScrappingClientConfig{Timeout: time.Second, WithProxy: true, UseProxyFirst: true})
+	c := app.newScrappingClient(ScrappingClientConfig{Timeout: time.Second, WithProxy: true, UseProxyFirst: true})
 	if c.ProxyURL == nil || *c.ProxyURL != "http://proxy.example" {
 		t.Errorf("proxy url = %v", c.ProxyURL)
 	}
@@ -24,7 +24,7 @@ func TestNewScrappingClient(t *testing.T) {
 	}
 
 	// Without proxy
-	c2 := newScrappingClient(ScrappingClientConfig{Timeout: time.Second, WithProxy: false})
+	c2 := app.newScrappingClient(ScrappingClientConfig{Timeout: time.Second, WithProxy: false})
 	if c2.ProxyURL != nil {
 		t.Errorf("expected nil proxy, got %v", c2.ProxyURL)
 	}
@@ -58,7 +58,7 @@ func TestDoDirectOnly(t *testing.T) {
 	srv := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))
 	})
-	c := newScrappingClient(ScrappingClientConfig{Timeout: 5 * time.Second, WithProxy: false})
+	c := app.newScrappingClient(ScrappingClientConfig{Timeout: 5 * time.Second, WithProxy: false})
 	req, _ := http.NewRequest("GET", srv.URL, nil)
 	resp, err := c.Do(req)
 	if err != nil {
@@ -78,7 +78,7 @@ func TestDoProxyFirstSuccess(t *testing.T) {
 		w.Write([]byte("via proxy"))
 	})
 	setProxyURL(t, proxy.URL)
-	c := newScrappingClient(ScrappingClientConfig{Timeout: 5 * time.Second, WithProxy: true, UseProxyFirst: true})
+	c := app.newScrappingClient(ScrappingClientConfig{Timeout: 5 * time.Second, WithProxy: true, UseProxyFirst: true})
 	req, _ := http.NewRequest("GET", "https://target.example/page", nil)
 	resp, err := c.Do(req)
 	if err != nil {
@@ -96,7 +96,7 @@ func TestDoProxyFirstFallbackToDirect(t *testing.T) {
 	target := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("direct ok"))
 	})
-	c := newScrappingClient(ScrappingClientConfig{Timeout: 5 * time.Second, WithProxy: true, UseProxyFirst: true})
+	c := app.newScrappingClient(ScrappingClientConfig{Timeout: 5 * time.Second, WithProxy: true, UseProxyFirst: true})
 	req, _ := http.NewRequest("GET", target.URL, nil)
 	resp, err := c.Do(req)
 	if err != nil {
@@ -110,7 +110,7 @@ func TestDoDirectFirstFallbackToProxy(t *testing.T) {
 		w.Write([]byte("proxy ok"))
 	})
 	setProxyURL(t, proxy.URL)
-	c := newScrappingClient(ScrappingClientConfig{Timeout: 5 * time.Second, WithProxy: true, UseProxyFirst: false})
+	c := app.newScrappingClient(ScrappingClientConfig{Timeout: 5 * time.Second, WithProxy: true, UseProxyFirst: false})
 	req, _ := http.NewRequest("GET", "http://127.0.0.1:0/unreachable", nil)
 	resp, err := c.Do(req)
 	if err != nil {
@@ -121,7 +121,7 @@ func TestDoDirectFirstFallbackToProxy(t *testing.T) {
 
 func TestDoBothFail(t *testing.T) {
 	setProxyURL(t, "http://127.0.0.1:0/deadproxy")
-	c := newScrappingClient(ScrappingClientConfig{Timeout: 2 * time.Second, WithProxy: true, UseProxyFirst: true})
+	c := app.newScrappingClient(ScrappingClientConfig{Timeout: 2 * time.Second, WithProxy: true, UseProxyFirst: true})
 	req, _ := http.NewRequest("GET", "http://127.0.0.1:0/deadtarget", nil)
 	if _, err := c.Do(req); err == nil {
 		t.Error("expected error when both fail")
@@ -132,7 +132,7 @@ var _ = httptest.NewServer
 
 func TestDoProxyRequestBuildError(t *testing.T) {
 	setProxyURL(t, "http://proxy.example")
-	c := newScrappingClient(ScrappingClientConfig{Timeout: time.Second, WithProxy: true, UseProxyFirst: true})
+	c := app.newScrappingClient(ScrappingClientConfig{Timeout: time.Second, WithProxy: true, UseProxyFirst: true})
 	// An invalid method makes http.NewRequest inside doProxyRequest fail, and the
 	// direct request also fails, so Do returns the combined error.
 	req := &http.Request{Method: "BAD METHOD", URL: mustParseURL("http://127.0.0.1:0/x"), Header: http.Header{}}

@@ -29,12 +29,12 @@ import (
 )
 
 type MobiRequest struct {
-	URL         string   `json:"url"`          // single article
-	URLs        []string `json:"urls"`         // multiple articles
+	URL         string   `json:"url"`  // single article
+	URLs        []string `json:"urls"` // multiple articles
 	Title       string   `json:"title"`
 	Author      string   `json:"author"`
-	CommentsURL string   `json:"commentsUrl"`  // optional comments page URL
-	EmbedImages *bool    `json:"embedImages"`  // embed images in MOBI (default true)
+	CommentsURL string   `json:"commentsUrl"` // optional comments page URL
+	EmbedImages *bool    `json:"embedImages"` // embed images in MOBI (default true)
 }
 
 var (
@@ -258,8 +258,10 @@ func insertJFIFHeader(j []byte) []byte {
 		return j // already has an APP0 segment
 	}
 	// FF E0, length 16, "JFIF\0", version 1.1, units=0, X/Y density 1, no thumb.
-	app0 := []byte{0xFF, 0xE0, 0x00, 0x10, 'J', 'F', 'I', 'F', 0x00,
-		0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00}
+	app0 := []byte{
+		0xFF, 0xE0, 0x00, 0x10, 'J', 'F', 'I', 'F', 0x00,
+		0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00,
+	}
 	out := make([]byte, 0, len(j)+len(app0))
 	out = append(out, j[0], j[1])
 	out = append(out, app0...)
@@ -379,7 +381,7 @@ func sanitizeFilename(s string) string {
 	return strings.TrimSpace(unsafeCharsRe.ReplaceAllString(s, ""))
 }
 
-func mobiHandler(w http.ResponseWriter, r *http.Request) {
+func (a *App) mobiHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		jsonError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -395,7 +397,7 @@ func mobiHandler(w http.ResponseWriter, r *http.Request) {
 
 	switch {
 	case req.URL != "":
-		article, err := fetchReadable(req.URL)
+		article, err := a.fetchReadable(req.URL)
 		if err != nil {
 			jsonError(w, err.Error(), http.StatusBadGateway)
 			return
@@ -403,7 +405,7 @@ func mobiHandler(w http.ResponseWriter, r *http.Request) {
 		if req.Title == "" {
 			req.Title = article.Title
 		}
-		commentsHTML := fetchCommentsHTML(req.CommentsURL)
+		commentsHTML := a.fetchCommentsHTML(req.CommentsURL)
 		link := `<p><a href="` + html.EscapeString(req.URL) + `">` + html.EscapeString(req.URL) + `</a></p>`
 
 		// Build a table of contents from the article's section headings (plus a
@@ -441,7 +443,7 @@ func mobiHandler(w http.ResponseWriter, r *http.Request) {
 		htmlContent = sb.String()
 
 	case len(req.URLs) > 0:
-		htmlContent = fetchAndCombine(req.URLs, req.Title)
+		htmlContent = a.fetchAndCombine(req.URLs, req.Title)
 
 	default:
 		jsonError(w, "url or urls field required", http.StatusBadRequest)
@@ -482,7 +484,7 @@ func mobiHandler(w http.ResponseWriter, r *http.Request) {
 
 // fetchAndCombine fetches all URLs concurrently (max 5 at a time) and
 // returns a single HTML document combining all article contents.
-func fetchAndCombine(urls []string, feedTitle string) string {
+func (a *App) fetchAndCombine(urls []string, feedTitle string) string {
 	type result struct {
 		index   int
 		title   string
@@ -501,7 +503,7 @@ func fetchAndCombine(urls []string, feedTitle string) string {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			article, err := fetchReadable(url)
+			article, err := a.fetchReadable(url)
 			if err != nil {
 				results[idx] = result{index: idx, err: err}
 				return
@@ -550,10 +552,12 @@ func fetchAndCombine(urls []string, feedTitle string) string {
 // byte layout, so offsets computed on the assembled document stay valid.
 const mobiTOCPlaceholder = "0000000000"
 
-var mobiTOCAnchorRe = regexp.MustCompile(`<a name="inkfeed-toc-(\d+)"></a>`)
-var mobiTOCLabelRe = regexp.MustCompile(`(?is)<h[1-6][^>]*>(.*?)</h[1-6]>`)
-var mobiTagStripRe = regexp.MustCompile(`<[^>]*>`)
-var mobiHeadingRe = regexp.MustCompile(`(?is)<h[1-4][^>]*>(.*?)</h[1-4]>`)
+var (
+	mobiTOCAnchorRe = regexp.MustCompile(`<a name="inkfeed-toc-(\d+)"></a>`)
+	mobiTOCLabelRe  = regexp.MustCompile(`(?is)<h[1-6][^>]*>(.*?)</h[1-6]>`)
+	mobiTagStripRe  = regexp.MustCompile(`<[^>]*>`)
+	mobiHeadingRe   = regexp.MustCompile(`(?is)<h[1-4][^>]*>(.*?)</h[1-4]>`)
+)
 
 // annotateArticleHeadings inserts a TOC anchor (<a name="inkfeed-toc-N">) before
 // each heading in an article body, numbering from startIdx, and returns the

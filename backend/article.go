@@ -24,14 +24,14 @@ type ArticleResponse struct {
 	WordCount     int    `json:"wordCount"`
 }
 
-func textHandler(w http.ResponseWriter, r *http.Request) {
+func (a *App) textHandler(w http.ResponseWriter, r *http.Request) {
 	rawURL := r.URL.Query().Get("url")
 	if rawURL == "" {
 		jsonError(w, "url parameter required", http.StatusBadRequest)
 		return
 	}
 
-	article, err := fetchReadable(rawURL)
+	article, err := a.fetchReadable(rawURL)
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusBadGateway)
 		return
@@ -43,14 +43,14 @@ func textHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(article.TextContent))
 }
 
-func articleHandler(w http.ResponseWriter, r *http.Request) {
+func (a *App) articleHandler(w http.ResponseWriter, r *http.Request) {
 	rawURL := r.URL.Query().Get("url")
 	if rawURL == "" {
 		jsonError(w, "url parameter required", http.StatusBadRequest)
 		return
 	}
 
-	if row, err := queries.GetArticleArchive(r.Context(), rawURL); err == nil {
+	if row, err := a.q.GetArticleArchive(r.Context(), rawURL); err == nil {
 		log.Printf("cache hit (archive): %s", rawURL)
 		resp := ArticleResponse{
 			Title:         row.Title,
@@ -67,7 +67,7 @@ func articleHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	article, err := fetchReadable(rawURL)
+	article, err := a.fetchReadable(rawURL)
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusBadGateway)
 		return
@@ -91,17 +91,17 @@ func articleHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	go archiveArticle(rawURL, article.Title, article.Byline, article.SiteName, publishedTime, article.Content, article.TextContent)
+	go a.archiveArticle(rawURL, article.Title, article.Byline, article.SiteName, publishedTime, article.Content, article.TextContent)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "public, max-age=300")
 	w.Write(body)
 }
 
-func archiveArticle(key, title, author, siteName, createdAt, htmlContent, textContent string) {
+func (a *App) archiveArticle(key, title, author, siteName, createdAt, htmlContent, textContent string) {
 	ctx := context.Background()
 	log.Printf("article archived: %s", key)
-	if err := queries.UpsertArticleArchive(ctx, db.UpsertArticleArchiveParams{
+	if err := a.q.UpsertArticleArchive(ctx, db.UpsertArticleArchiveParams{
 		Key:         key,
 		Title:       title,
 		Author:      author,
@@ -116,9 +116,9 @@ func archiveArticle(key, title, author, siteName, createdAt, htmlContent, textCo
 
 const archivePruneTargetBytes = 90 * 1024 * 1024 // 90 MB - prune down to this
 
-func pruneArticleArchive() {
+func (a *App) pruneArticleArchive() {
 	ctx := context.Background()
-	size, err := queries.GetArticleArchiveTotalSize(ctx)
+	size, err := a.q.GetArticleArchiveTotalSize(ctx)
 	if err != nil {
 		log.Printf("article archive size check error: %v", err)
 		return
@@ -129,18 +129,18 @@ func pruneArticleArchive() {
 	log.Printf("article archive size %d bytes exceeds target, pruning oldest articles", size)
 	deleted := 0
 	for size > archivePruneTargetBytes {
-		article, err := queries.GetOldestArticleArchiveKey(ctx)
+		article, err := a.q.GetOldestArticleArchiveKey(ctx)
 		if err != nil {
 			log.Printf("article archive prune error: %v", err)
 			return
 		}
-		if err := queries.DeleteOldestArticleArchiveRow(ctx); err != nil {
+		if err := a.q.DeleteOldestArticleArchiveRow(ctx); err != nil {
 			log.Printf("article archive delete error: %v", err)
 			return
 		}
 		deleted++
 		log.Printf("article archive deleted: %s (%s)", article.Key, article.Title)
-		size, err = queries.GetArticleArchiveTotalSize(ctx)
+		size, err = a.q.GetArticleArchiveTotalSize(ctx)
 		if err != nil {
 			log.Printf("article archive size check error: %v", err)
 			return
@@ -149,13 +149,13 @@ func pruneArticleArchive() {
 	log.Printf("article archive pruned %d rows, size now %d bytes", deleted, size)
 }
 
-func startArticleArchivePruner() {
+func (a *App) startArticleArchivePruner() {
 	go func() {
-		pruneArticleArchive() // run once at startup
+		a.pruneArticleArchive() // run once at startup
 		ticker := time.NewTicker(1 * time.Hour)
 		defer ticker.Stop()
 		for range ticker.C {
-			pruneArticleArchive()
+			a.pruneArticleArchive()
 		}
 	}()
 }
@@ -197,8 +197,8 @@ func articleMetaHTML(article readability.Article) string {
 }
 
 // fetchReadable fetches a URL and runs Mozilla Readability on the response.
-func fetchReadable(rawURL string) (readability.Article, error) {
-	client := newScrappingClient(ScrappingClientConfig{Timeout: 30 * time.Second, WithProxy: true, UseProxyFirst: true})
+func (a *App) fetchReadable(rawURL string) (readability.Article, error) {
+	client := a.newScrappingClient(ScrappingClientConfig{Timeout: 30 * time.Second, WithProxy: true, UseProxyFirst: true})
 	req, err := http.NewRequest("GET", rawURL, nil)
 	if err != nil {
 		return readability.Article{}, err

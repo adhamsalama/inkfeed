@@ -14,14 +14,14 @@ type RedditPostResponse struct {
 	ContentHTML string `json:"content_html"`
 }
 
-func redditPostHandler(w http.ResponseWriter, r *http.Request) {
+func (a *App) redditPostHandler(w http.ResponseWriter, r *http.Request) {
 	rawURL := r.URL.Query().Get("url")
 	if rawURL == "" {
 		jsonError(w, "url parameter required", http.StatusBadRequest)
 		return
 	}
 
-	client := newScrappingClient(ScrappingClientConfig{Timeout: 15 * time.Second, WithProxy: true, UseProxyFirst: true})
+	client := a.newScrappingClient(ScrappingClientConfig{Timeout: 15 * time.Second, WithProxy: true, UseProxyFirst: true})
 	req, err := http.NewRequest("GET", rawURL, nil)
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusBadRequest)

@@ -72,32 +72,32 @@ type preferencesResponse struct {
 	Favorites       []favoriteItem  `json:"favorites"`
 }
 
-func preferencesHandler(w http.ResponseWriter, r *http.Request) {
+func (a *App) preferencesHandler(w http.ResponseWriter, r *http.Request) {
 	userID := r.Context().Value(contextKey("userID")).(int64)
 	switch r.Method {
 	case http.MethodGet:
-		getPreferencesHandler(w, r, userID)
+		a.getPreferencesHandler(w, r, userID)
 	case http.MethodPut:
-		putPreferencesHandler(w, r, userID)
+		a.putPreferencesHandler(w, r, userID)
 	default:
 		jsonError(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
 }
 
-func getPreferencesHandler(w http.ResponseWriter, r *http.Request, userID int64) {
-	user, err := queries.GetUserByID(r.Context(), userID)
+func (a *App) getPreferencesHandler(w http.ResponseWriter, r *http.Request, userID int64) {
+	user, err := a.q.GetUserByID(r.Context(), userID)
 	if err != nil {
 		jsonError(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 
-	prefs, err := queries.GetUserPreferences(r.Context(), userID)
+	prefs, err := a.q.GetUserPreferences(r.Context(), userID)
 	if err != nil && err != sql.ErrNoRows {
 		jsonError(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 
-	feeds, err := queries.GetUserSavedFeeds(r.Context(), userID)
+	feeds, err := a.q.GetUserSavedFeeds(r.Context(), userID)
 	if err != nil {
 		jsonError(w, "internal error", http.StatusInternalServerError)
 		return
@@ -108,7 +108,7 @@ func getPreferencesHandler(w http.ResponseWriter, r *http.Request, userID int64)
 		feedItems[i] = savedFeedItem{URL: f.Url, Title: f.Title, ArchiveEnabled: f.ArchiveEnabled != 0}
 	}
 
-	groups, err := queries.GetUserFeedGroups(r.Context(), userID)
+	groups, err := a.q.GetUserFeedGroups(r.Context(), userID)
 	if err != nil {
 		jsonError(w, "internal error", http.StatusInternalServerError)
 		return
@@ -116,7 +116,7 @@ func getPreferencesHandler(w http.ResponseWriter, r *http.Request, userID int64)
 
 	groupDataList := make([]feedGroupData, 0, len(groups))
 	for _, g := range groups {
-		items, err := queries.GetFeedGroupItems(r.Context(), g.ID)
+		items, err := a.q.GetFeedGroupItems(r.Context(), g.ID)
 		if err != nil {
 			jsonError(w, "internal error", http.StatusInternalServerError)
 			return
@@ -128,7 +128,7 @@ func getPreferencesHandler(w http.ResponseWriter, r *http.Request, userID int64)
 		groupDataList = append(groupDataList, feedGroupData{Name: g.Name, Feeds: feedGroupItems})
 	}
 
-	favRows, err := queries.GetUserFavorites(r.Context(), userID)
+	favRows, err := a.q.GetUserFavorites(r.Context(), userID)
 	if err != nil {
 		jsonError(w, "internal error", http.StatusInternalServerError)
 		return
@@ -183,7 +183,7 @@ func getPreferencesHandler(w http.ResponseWriter, r *http.Request, userID int64)
 	json.NewEncoder(w).Encode(resp)
 }
 
-func putPreferencesHandler(w http.ResponseWriter, r *http.Request, userID int64) {
+func (a *App) putPreferencesHandler(w http.ResponseWriter, r *http.Request, userID int64) {
 	var req preferencesRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		jsonError(w, "invalid request", http.StatusBadRequest)
@@ -199,7 +199,7 @@ func putPreferencesHandler(w http.ResponseWriter, r *http.Request, userID int64)
 		mobiEmbedInt = 1
 	}
 
-	err := queries.UpsertUserPreferences(r.Context(), db.UpsertUserPreferencesParams{
+	err := a.q.UpsertUserPreferences(r.Context(), db.UpsertUserPreferencesParams{
 		UserID:          userID,
 		FontSize:        sql.NullFloat64{Float64: req.FontSize, Valid: true},
 		LetterSpacing:   sql.NullFloat64{Float64: req.LetterSpacing, Valid: true},
@@ -209,8 +209,18 @@ func putPreferencesHandler(w http.ResponseWriter, r *http.Request, userID int64)
 		MobiEmbedImages: sql.NullInt64{Int64: mobiEmbedInt, Valid: true},
 		EmailTo:         sql.NullString{String: req.EmailTo, Valid: true},
 		FontFamily:      sql.NullString{String: req.FontFamily, Valid: true},
-		BoldText:        sql.NullInt64{Int64: func() int64 { if req.BoldText { return 1 }; return 0 }(), Valid: true},
-		DarkMode:        sql.NullInt64{Int64: func() int64 { if req.DarkMode { return 1 }; return 0 }(), Valid: true},
+		BoldText: sql.NullInt64{Int64: func() int64 {
+			if req.BoldText {
+				return 1
+			}
+			return 0
+		}(), Valid: true},
+		DarkMode: sql.NullInt64{Int64: func() int64 {
+			if req.DarkMode {
+				return 1
+			}
+			return 0
+		}(), Valid: true},
 	})
 	if err != nil {
 		jsonError(w, "internal error", http.StatusInternalServerError)
@@ -220,7 +230,7 @@ func putPreferencesHandler(w http.ResponseWriter, r *http.Request, userID int64)
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func savedFeedsHandler(w http.ResponseWriter, r *http.Request) {
+func (a *App) savedFeedsHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {
 		jsonError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -244,7 +254,7 @@ func savedFeedsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := queries.DeleteUserSavedFeeds(r.Context(), userID); err != nil {
+	if err := a.q.DeleteUserSavedFeeds(r.Context(), userID); err != nil {
 		jsonError(w, "internal error", http.StatusInternalServerError)
 		return
 	}
@@ -254,7 +264,7 @@ func savedFeedsHandler(w http.ResponseWriter, r *http.Request) {
 		if f.ArchiveEnabled {
 			archiveEnabled = 1
 		}
-		err := queries.InsertUserSavedFeed(r.Context(), db.InsertUserSavedFeedParams{
+		err := a.q.InsertUserSavedFeed(r.Context(), db.InsertUserSavedFeedParams{
 			UserID:         userID,
 			Url:            f.URL,
 			Title:          f.Title,
@@ -270,7 +280,7 @@ func savedFeedsHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func feedGroupsHandler(w http.ResponseWriter, r *http.Request) {
+func (a *App) feedGroupsHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {
 		jsonError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -283,17 +293,17 @@ func feedGroupsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := queries.DeleteUserFeedGroupItems(r.Context(), userID); err != nil {
+	if err := a.q.DeleteUserFeedGroupItems(r.Context(), userID); err != nil {
 		jsonError(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	if err := queries.DeleteUserFeedGroups(r.Context(), userID); err != nil {
+	if err := a.q.DeleteUserFeedGroups(r.Context(), userID); err != nil {
 		jsonError(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 
 	for i, g := range groups {
-		groupID, err := queries.InsertFeedGroup(r.Context(), db.InsertFeedGroupParams{
+		groupID, err := a.q.InsertFeedGroup(r.Context(), db.InsertFeedGroupParams{
 			UserID:   userID,
 			Name:     g.Name,
 			Position: int64(i),
@@ -303,7 +313,7 @@ func feedGroupsHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for j, item := range g.Feeds {
-			err := queries.InsertFeedGroupItem(r.Context(), db.InsertFeedGroupItemParams{
+			err := a.q.InsertFeedGroupItem(r.Context(), db.InsertFeedGroupItemParams{
 				GroupID:  groupID,
 				Url:      item.URL,
 				Title:    item.Title,
@@ -319,7 +329,7 @@ func feedGroupsHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func favoritesHandler(w http.ResponseWriter, r *http.Request) {
+func (a *App) favoritesHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {
 		jsonError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -332,13 +342,13 @@ func favoritesHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := queries.DeleteAllUserFavorites(r.Context(), userID); err != nil {
+	if err := a.q.DeleteAllUserFavorites(r.Context(), userID); err != nil {
 		jsonError(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 
 	for _, f := range favs {
-		err := queries.InsertUserFavorite(r.Context(), db.InsertUserFavoriteParams{
+		err := a.q.InsertUserFavorite(r.Context(), db.InsertUserFavoriteParams{
 			UserID:      userID,
 			Url:         f.URL,
 			Title:       f.Title,
@@ -355,7 +365,7 @@ func favoritesHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func signoutHandler(w http.ResponseWriter, r *http.Request) {
+func (a *App) signoutHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		jsonError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -363,10 +373,10 @@ func signoutHandler(w http.ResponseWriter, r *http.Request) {
 
 	cookie, err := r.Cookie("session")
 	if err == nil {
-		queries.DeleteSession(r.Context(), cookie.Value)
+		a.q.DeleteSession(r.Context(), cookie.Value)
 	}
 
-	secure := strings.HasPrefix(allowedOrigins[0], "https://")
+	secure := strings.HasPrefix(a.allowedOrigins[0], "https://")
 	http.SetCookie(w, &http.Cookie{
 		Name:     "session",
 		Value:    "",

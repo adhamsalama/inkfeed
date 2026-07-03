@@ -144,19 +144,19 @@ func TestEmailHandler(t *testing.T) {
 
 	// wrong method
 	w := httptest.NewRecorder()
-	emailHandler(w, httptest.NewRequest(http.MethodGet, "/email", nil))
+	app.emailHandler(w, httptest.NewRequest(http.MethodGet, "/email", nil))
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Errorf("GET = %d", w.Code)
 	}
 	// bad body
 	w = httptest.NewRecorder()
-	emailHandler(w, postJSON("/email", `{bad`))
+	app.emailHandler(w, postJSON("/email", `{bad`))
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("bad body = %d", w.Code)
 	}
 	// missing required fields
 	w = httptest.NewRecorder()
-	emailHandler(w, postJSON("/email", `{"url":"https://x"}`))
+	app.emailHandler(w, postJSON("/email", `{"url":"https://x"}`))
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("missing to = %d", w.Code)
 	}
@@ -165,28 +165,28 @@ func TestEmailHandler(t *testing.T) {
 
 	// single article, epub (default format)
 	w = httptest.NewRecorder()
-	emailHandler(w, postJSON("/email", `{"url":"https://example.com/e1","to":"k@kindle.com","embedImages":false}`))
+	app.emailHandler(w, postJSON("/email", `{"url":"https://example.com/e1","to":"k@kindle.com","embedImages":false}`))
 	if w.Code != http.StatusOK {
 		t.Fatalf("single epub email = %d body=%s", w.Code, w.Body.String())
 	}
 
 	// single article, mobi
 	w = httptest.NewRecorder()
-	emailHandler(w, postJSON("/email", `{"url":"https://example.com/e2","to":"k@kindle.com","format":"mobi","embedImages":false}`))
+	app.emailHandler(w, postJSON("/email", `{"url":"https://example.com/e2","to":"k@kindle.com","format":"mobi","embedImages":false}`))
 	if w.Code != http.StatusOK {
 		t.Errorf("single mobi email = %d", w.Code)
 	}
 
 	// bulk epub
 	w = httptest.NewRecorder()
-	emailHandler(w, postJSON("/email", `{"urls":["https://example.com/a","https://example.com/b"],"to":"k@kindle.com","author":"Bundle","embedImages":false}`))
+	app.emailHandler(w, postJSON("/email", `{"urls":["https://example.com/a","https://example.com/b"],"to":"k@kindle.com","author":"Bundle","embedImages":false}`))
 	if w.Code != http.StatusOK {
 		t.Errorf("bulk epub email = %d", w.Code)
 	}
 
 	// bulk mobi
 	w = httptest.NewRecorder()
-	emailHandler(w, postJSON("/email", `{"urls":["https://example.com/a","https://example.com/b"],"to":"k@kindle.com","format":"mobi","embedImages":false}`))
+	app.emailHandler(w, postJSON("/email", `{"urls":["https://example.com/a","https://example.com/b"],"to":"k@kindle.com","format":"mobi","embedImages":false}`))
 	if w.Code != http.StatusOK {
 		t.Errorf("bulk mobi email = %d", w.Code)
 	}
@@ -197,7 +197,7 @@ func TestEmailHandlerFetchError(t *testing.T) {
 	defer os.Unsetenv("EMAIL_PROVIDER")
 	setProxyURL(t, "http://127.0.0.1:0/dead")
 	w := httptest.NewRecorder()
-	emailHandler(w, postJSON("/email", `{"url":"http://127.0.0.1:0/dead","to":"k@kindle.com"}`))
+	app.emailHandler(w, postJSON("/email", `{"url":"http://127.0.0.1:0/dead","to":"k@kindle.com"}`))
 	if w.Code != http.StatusBadGateway {
 		t.Errorf("fetch error = %d", w.Code)
 	}

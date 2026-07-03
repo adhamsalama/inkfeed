@@ -12,11 +12,12 @@ type ScrappingClientConfig struct {
 	UseProxyFirst bool
 }
 
-func newScrappingClient(cfg ScrappingClientConfig) *ScrappingYoungLad {
+func (a *App) newScrappingClient(cfg ScrappingClientConfig) *ScrappingYoungLad {
 	ua := userAgent
 	var proxyURL *string
-	if cfg.WithProxy && feedProxyURL != "" {
-		proxyURL = &feedProxyURL
+	if cfg.WithProxy && a.proxyURL != "" {
+		p := a.proxyURL
+		proxyURL = &p
 	}
 	return &ScrappingYoungLad{
 		Client:        &http.Client{Timeout: cfg.Timeout},

@@ -31,7 +31,7 @@ type FeedResponse struct {
 }
 
 // fetchAndParseFeed fetches and parses a feed URL, falling back to the proxy on failure.
-func fetchAndParseFeed(feedURL string) (FeedResponse, error) {
+func (a *App) fetchAndParseFeed(feedURL string) (FeedResponse, error) {
 	allSuites := append(tls.CipherSuites(), tls.InsecureCipherSuites()...)
 	cipherIDs := make([]uint16, len(allSuites))
 	for i, s := range allSuites {
@@ -66,7 +66,7 @@ func fetchAndParseFeed(feedURL string) (FeedResponse, error) {
 	}
 
 	log.Printf("retrying %s via proxy", feedURL)
-	proxyURL := feedProxyURL + "?url=" + feedURL
+	proxyURL := a.proxyURL + "?url=" + feedURL
 	proxyReq, err := http.NewRequest("GET", proxyURL, nil)
 	if err != nil {
 		return FeedResponse{}, err
@@ -84,14 +84,14 @@ func fetchAndParseFeed(feedURL string) (FeedResponse, error) {
 	return parseFeed(feedURL, proxyBody)
 }
 
-func feedHandler(w http.ResponseWriter, r *http.Request) {
+func (a *App) feedHandler(w http.ResponseWriter, r *http.Request) {
 	feedURL := r.URL.Query().Get("url")
 	if feedURL == "" {
 		jsonError(w, "url parameter required", http.StatusBadRequest)
 		return
 	}
 
-	resp, err := fetchAndParseFeed(feedURL)
+	resp, err := a.fetchAndParseFeed(feedURL)
 	if err != nil {
 		jsonError(w, "failed to parse feed", http.StatusBadGateway)
 		fmt.Printf("err: %v\n", err)

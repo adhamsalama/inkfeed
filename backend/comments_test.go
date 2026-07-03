@@ -167,7 +167,7 @@ func TestFetchHNComments(t *testing.T) {
 		w.Write([]byte(hnJSON))
 	})
 	setProxyURL(t, srv.URL)
-	out, err := fetchHNComments("https://news.ycombinator.com/item?id=12345")
+	out, err := app.fetchHNComments("https://news.ycombinator.com/item?id=12345")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,11 +176,11 @@ func TestFetchHNComments(t *testing.T) {
 	}
 
 	// No item id
-	if _, err := fetchHNComments("https://news.ycombinator.com/item"); err == nil {
+	if _, err := app.fetchHNComments("https://news.ycombinator.com/item"); err == nil {
 		t.Error("expected error without id")
 	}
 	// empty id
-	if _, err := fetchHNComments("https://news.ycombinator.com/item?id="); err == nil {
+	if _, err := app.fetchHNComments("https://news.ycombinator.com/item?id="); err == nil {
 		t.Error("expected error empty id")
 	}
 
@@ -189,7 +189,7 @@ func TestFetchHNComments(t *testing.T) {
 		w.Write([]byte(`{"id":1,"children":[]}`))
 	})
 	setProxyURL(t, srv2.URL)
-	out, _ = fetchHNComments("https://news.ycombinator.com/item?id=1")
+	out, _ = app.fetchHNComments("https://news.ycombinator.com/item?id=1")
 	if !strings.Contains(out, "No comments") {
 		t.Errorf("expected no comments msg: %s", out)
 	}
@@ -201,7 +201,7 @@ func TestFetchRedditComments(t *testing.T) {
 		w.Write([]byte(redditJSON))
 	})
 	setProxyURL(t, srv.URL)
-	out, err := fetchRedditComments("https://reddit.com/r/x/comments/y/.json")
+	out, err := app.fetchRedditComments("https://reddit.com/r/x/comments/y/.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +214,7 @@ func TestFetchRedditComments(t *testing.T) {
 		w.Write([]byte(`[{"data":{"children":[]}},{"data":{"children":[]}}]`))
 	})
 	setProxyURL(t, srv2.URL)
-	out, _ = fetchRedditComments("https://reddit.com/x/.json")
+	out, _ = app.fetchRedditComments("https://reddit.com/x/.json")
 	if !strings.Contains(out, "No comments") {
 		t.Errorf("expected no comments: %s", out)
 	}
@@ -226,7 +226,7 @@ func TestFetchLobsteComments(t *testing.T) {
 		w.Write([]byte(lobJSON))
 	})
 	setProxyURL(t, srv.URL)
-	out, err := fetchLobsteComments("https://lobste.rs/s/abc/title")
+	out, err := app.fetchLobsteComments("https://lobste.rs/s/abc/title")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,13 +235,13 @@ func TestFetchLobsteComments(t *testing.T) {
 	}
 
 	// bad url
-	if _, err := fetchLobsteComments("https://lobste.rs/nope"); err == nil {
+	if _, err := app.fetchLobsteComments("https://lobste.rs/nope"); err == nil {
 		t.Error("expected error")
 	}
 }
 
 func TestFetchCommentsHTML(t *testing.T) {
-	if fetchCommentsHTML("") != "" {
+	if app.fetchCommentsHTML("") != "" {
 		t.Error("empty url -> empty")
 	}
 
@@ -250,20 +250,20 @@ func TestFetchCommentsHTML(t *testing.T) {
 		w.Write([]byte(`{"id":1,"children":[{"id":2,"author":"a","text":"hi","children":[]}]}`))
 	})
 	setProxyURL(t, srv.URL)
-	if !strings.Contains(fetchCommentsHTML("https://news.ycombinator.com/item?id=1"), "hi") {
+	if !strings.Contains(app.fetchCommentsHTML("https://news.ycombinator.com/item?id=1"), "hi") {
 		t.Error("HN routing failed")
 	}
 
 	// Fallback to readability for generic URL
 	serveArticleViaProxy(t, articleHTML)
-	if fetchCommentsHTML("https://example.com/generic") == "" {
+	if app.fetchCommentsHTML("https://example.com/generic") == "" {
 		t.Error("generic fallback returned empty")
 	}
 
 	// Error case returns empty (not error): generic URL unreachable via both
 	// proxy and direct.
 	setProxyURL(t, "http://127.0.0.1:0/dead")
-	if fetchCommentsHTML("http://127.0.0.1:0/dead-generic") != "" {
+	if app.fetchCommentsHTML("http://127.0.0.1:0/dead-generic") != "" {
 		t.Error("fetch error should return empty string")
 	}
 }
@@ -271,7 +271,7 @@ func TestFetchCommentsHTML(t *testing.T) {
 func TestCommentsHandler(t *testing.T) {
 	// missing url
 	w := httptest.NewRecorder()
-	commentsHandler(w, httptest.NewRequest(http.MethodGet, "/comments", nil))
+	app.commentsHandler(w, httptest.NewRequest(http.MethodGet, "/comments", nil))
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("missing url = %d", w.Code)
 	}
@@ -282,7 +282,7 @@ func TestCommentsHandler(t *testing.T) {
 	})
 	setProxyURL(t, srv.URL)
 	w = httptest.NewRecorder()
-	commentsHandler(w, httptest.NewRequest(http.MethodGet, "/comments?url=https://news.ycombinator.com/item?id=1", nil))
+	app.commentsHandler(w, httptest.NewRequest(http.MethodGet, "/comments?url=https://news.ycombinator.com/item?id=1", nil))
 	if w.Code != http.StatusOK {
 		t.Fatalf("HN comments handler = %d", w.Code)
 	}
@@ -298,7 +298,7 @@ func TestCommentsHandler(t *testing.T) {
 	})
 	setProxyURL(t, srvR.URL)
 	w = httptest.NewRecorder()
-	commentsHandler(w, httptest.NewRequest(http.MethodGet, "/comments?url=https://reddit.com/x/.json", nil))
+	app.commentsHandler(w, httptest.NewRequest(http.MethodGet, "/comments?url=https://reddit.com/x/.json", nil))
 	if w.Code != http.StatusOK {
 		t.Errorf("reddit handler = %d", w.Code)
 	}
@@ -309,7 +309,7 @@ func TestCommentsHandler(t *testing.T) {
 	})
 	setProxyURL(t, srvL.URL)
 	w = httptest.NewRecorder()
-	commentsHandler(w, httptest.NewRequest(http.MethodGet, "/comments?url=https://lobste.rs/s/abc/t", nil))
+	app.commentsHandler(w, httptest.NewRequest(http.MethodGet, "/comments?url=https://lobste.rs/s/abc/t", nil))
 	if w.Code != http.StatusOK {
 		t.Errorf("lobsters handler = %d", w.Code)
 	}
@@ -317,7 +317,7 @@ func TestCommentsHandler(t *testing.T) {
 	// Generic readability
 	serveArticleViaProxy(t, articleHTML)
 	w = httptest.NewRecorder()
-	commentsHandler(w, httptest.NewRequest(http.MethodGet, "/comments?url=https://example.com/g", nil))
+	app.commentsHandler(w, httptest.NewRequest(http.MethodGet, "/comments?url=https://example.com/g", nil))
 	if w.Code != http.StatusOK {
 		t.Errorf("generic handler = %d", w.Code)
 	}
@@ -325,7 +325,7 @@ func TestCommentsHandler(t *testing.T) {
 	// Generic error
 	setProxyURL(t, "http://127.0.0.1:0/dead")
 	w = httptest.NewRecorder()
-	commentsHandler(w, httptest.NewRequest(http.MethodGet, "/comments?url=http://127.0.0.1:0/dead", nil))
+	app.commentsHandler(w, httptest.NewRequest(http.MethodGet, "/comments?url=http://127.0.0.1:0/dead", nil))
 	if w.Code != http.StatusBadGateway {
 		t.Errorf("generic error = %d", w.Code)
 	}

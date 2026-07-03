@@ -16,7 +16,6 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-
 const sessionDuration = 15 * 24 * time.Hour
 
 func validatePassword(password string) error {
@@ -46,7 +45,7 @@ type authRequest struct {
 	Password string `json:"password"`
 }
 
-func signupHandler(w http.ResponseWriter, r *http.Request) {
+func (a *App) signupHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		jsonError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -69,7 +68,7 @@ func signupHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := queries.CreateUser(r.Context(), db.CreateUserParams{
+	user, err := a.q.CreateUser(r.Context(), db.CreateUserParams{
 		Email:        req.Email,
 		PasswordHash: string(hash),
 	})
@@ -78,7 +77,7 @@ func signupHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := issueSession(w, r, user.ID); err != nil {
+	if err := a.issueSession(w, r, user.ID); err != nil {
 		jsonError(w, "internal error", http.StatusInternalServerError)
 		return
 	}
@@ -87,7 +86,7 @@ func signupHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"email": req.Email})
 }
 
-func signinHandler(w http.ResponseWriter, r *http.Request) {
+func (a *App) signinHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		jsonError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -99,7 +98,7 @@ func signinHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := queries.GetUserByEmail(r.Context(), req.Email)
+	user, err := a.q.GetUserByEmail(r.Context(), req.Email)
 	if err == sql.ErrNoRows {
 		jsonError(w, "invalid credentials", http.StatusUnauthorized)
 		return
@@ -113,7 +112,7 @@ func signinHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := issueSession(w, r, user.ID); err != nil {
+	if err := a.issueSession(w, r, user.ID); err != nil {
 		jsonError(w, "internal error", http.StatusInternalServerError)
 		return
 	}
@@ -128,7 +127,7 @@ type changePasswordRequest struct {
 	ConfirmPassword string `json:"confirmPassword"`
 }
 
-func changePasswordHandler(w http.ResponseWriter, r *http.Request) {
+func (a *App) changePasswordHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		jsonError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -151,7 +150,7 @@ func changePasswordHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	userID := r.Context().Value(contextKey("userID")).(int64)
-	user, err := queries.GetUserByID(r.Context(), userID)
+	user, err := a.q.GetUserByID(r.Context(), userID)
 	if err != nil {
 		jsonError(w, "internal error", http.StatusInternalServerError)
 		return
@@ -168,7 +167,7 @@ func changePasswordHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := queries.UpdateUserPassword(r.Context(), db.UpdateUserPasswordParams{
+	if err := a.q.UpdateUserPassword(r.Context(), db.UpdateUserPasswordParams{
 		PasswordHash: string(hash),
 		ID:           userID,
 	}); err != nil {
@@ -181,7 +180,7 @@ func changePasswordHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"message": "password changed successfully"})
 }
 
-func issueSession(w http.ResponseWriter, r *http.Request, userID int64) error {
+func (a *App) issueSession(w http.ResponseWriter, r *http.Request, userID int64) error {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
 		return err
@@ -189,7 +188,7 @@ func issueSession(w http.ResponseWriter, r *http.Request, userID int64) error {
 	token := hex.EncodeToString(b)
 	expires := time.Now().Add(sessionDuration)
 
-	if err := queries.CreateSession(r.Context(), db.CreateSessionParams{
+	if err := a.q.CreateSession(r.Context(), db.CreateSessionParams{
 		Token:     token,
 		UserID:    userID,
 		ExpiresAt: expires,
@@ -197,7 +196,7 @@ func issueSession(w http.ResponseWriter, r *http.Request, userID int64) error {
 		return err
 	}
 
-	secure := strings.HasPrefix(allowedOrigins[0], "https://")
+	secure := strings.HasPrefix(a.allowedOrigins[0], "https://")
 	http.SetCookie(w, &http.Cookie{
 		Name:     "session",
 		Value:    token,
@@ -211,7 +210,7 @@ func issueSession(w http.ResponseWriter, r *http.Request, userID int64) error {
 }
 
 // authMiddleware validates the session cookie on every request.
-func authMiddleware(next http.Handler) http.Handler {
+func (a *App) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cookie, err := r.Cookie("session")
 		if err != nil {
@@ -219,7 +218,7 @@ func authMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		session, err := queries.GetSession(r.Context(), cookie.Value)
+		session, err := a.q.GetSession(r.Context(), cookie.Value)
 		if err == sql.ErrNoRows {
 			jsonError(w, "unauthorized", http.StatusUnauthorized)
 			return

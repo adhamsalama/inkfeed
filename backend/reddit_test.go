@@ -10,7 +10,7 @@ import (
 func TestRedditPostHandler(t *testing.T) {
 	// missing url
 	w := httptest.NewRecorder()
-	redditPostHandler(w, httptest.NewRequest(http.MethodGet, "/reddit-post", nil))
+	app.redditPostHandler(w, httptest.NewRequest(http.MethodGet, "/reddit-post", nil))
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("missing url = %d", w.Code)
 	}
@@ -22,7 +22,7 @@ func TestRedditPostHandler(t *testing.T) {
 	})
 	setProxyURL(t, srv.URL)
 	w = httptest.NewRecorder()
-	redditPostHandler(w, httptest.NewRequest(http.MethodGet, "/reddit-post?url=https://reddit.com/x/.json", nil))
+	app.redditPostHandler(w, httptest.NewRequest(http.MethodGet, "/reddit-post?url=https://reddit.com/x/.json", nil))
 	if w.Code != http.StatusOK {
 		t.Fatalf("self post = %d", w.Code)
 	}
@@ -39,7 +39,7 @@ func TestRedditPostHandler(t *testing.T) {
 	})
 	setProxyURL(t, srv2.URL)
 	w = httptest.NewRecorder()
-	redditPostHandler(w, httptest.NewRequest(http.MethodGet, "/reddit-post?url=https://reddit.com/y/.json", nil))
+	app.redditPostHandler(w, httptest.NewRequest(http.MethodGet, "/reddit-post?url=https://reddit.com/y/.json", nil))
 	json.Unmarshal(w.Body.Bytes(), &resp)
 	if resp.ActualURL != "https://target.com/article" {
 		t.Errorf("actual url = %q", resp.ActualURL)
@@ -54,7 +54,7 @@ func TestRedditPostHandler(t *testing.T) {
 	})
 	setProxyURL(t, srv3.URL)
 	w = httptest.NewRecorder()
-	redditPostHandler(w, httptest.NewRequest(http.MethodGet, "/reddit-post?url=https://reddit.com/z/.json", nil))
+	app.redditPostHandler(w, httptest.NewRequest(http.MethodGet, "/reddit-post?url=https://reddit.com/z/.json", nil))
 	if w.Code != http.StatusBadGateway {
 		t.Errorf("bad json = %d", w.Code)
 	}
@@ -65,7 +65,7 @@ func TestRedditPostHandler(t *testing.T) {
 	})
 	setProxyURL(t, srv4.URL)
 	w = httptest.NewRecorder()
-	redditPostHandler(w, httptest.NewRequest(http.MethodGet, "/reddit-post?url=https://reddit.com/w/.json", nil))
+	app.redditPostHandler(w, httptest.NewRequest(http.MethodGet, "/reddit-post?url=https://reddit.com/w/.json", nil))
 	if w.Code != http.StatusBadGateway {
 		t.Errorf("empty children = %d", w.Code)
 	}
@@ -73,7 +73,7 @@ func TestRedditPostHandler(t *testing.T) {
 	// fetch error
 	setProxyURL(t, "http://127.0.0.1:0/dead")
 	w = httptest.NewRecorder()
-	redditPostHandler(w, httptest.NewRequest(http.MethodGet, "/reddit-post?url=http://127.0.0.1:0/dead", nil))
+	app.redditPostHandler(w, httptest.NewRequest(http.MethodGet, "/reddit-post?url=http://127.0.0.1:0/dead", nil))
 	if w.Code != http.StatusBadGateway {
 		t.Errorf("fetch error = %d", w.Code)
 	}

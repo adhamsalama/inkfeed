@@ -97,39 +97,39 @@ const (
 
 // fetchCommentsHTML fetches and returns rendered comment HTML for the given URL.
 // Returns empty string on error so callers can treat it as optional.
-func fetchCommentsHTML(rawURL string) string {
+func (a *App) fetchCommentsHTML(rawURL string) string {
 	if rawURL == "" {
 		return ""
 	}
 	if strings.Contains(rawURL, "news.ycombinator.com/item?id=") {
-		h, err := fetchHNComments(rawURL)
+		h, err := a.fetchHNComments(rawURL)
 		if err != nil {
 			return ""
 		}
 		return h
 	}
 	if strings.Contains(rawURL, "lobste.rs/s/") {
-		h, err := fetchLobsteComments(rawURL)
+		h, err := a.fetchLobsteComments(rawURL)
 		if err != nil {
 			return ""
 		}
 		return h
 	}
 	if strings.Contains(rawURL, ".json") {
-		h, err := fetchRedditComments(rawURL)
+		h, err := a.fetchRedditComments(rawURL)
 		if err != nil {
 			return ""
 		}
 		return h
 	}
-	article, err := fetchReadable(rawURL)
+	article, err := a.fetchReadable(rawURL)
 	if err != nil {
 		return ""
 	}
 	return article.Content
 }
 
-func commentsHandler(w http.ResponseWriter, r *http.Request) {
+func (a *App) commentsHandler(w http.ResponseWriter, r *http.Request) {
 	rawURL := r.URL.Query().Get("url")
 	if rawURL == "" {
 		jsonError(w, "url parameter required", http.StatusBadRequest)
@@ -140,7 +140,7 @@ func commentsHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "public, max-age=300")
 
 	if strings.Contains(rawURL, "news.ycombinator.com/item?id=") {
-		htmlContent, err := fetchHNComments(rawURL)
+		htmlContent, err := a.fetchHNComments(rawURL)
 		if err != nil {
 			jsonError(w, err.Error(), http.StatusBadGateway)
 			return
@@ -150,7 +150,7 @@ func commentsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if strings.Contains(rawURL, "lobste.rs/s/") {
-		htmlContent, err := fetchLobsteComments(rawURL)
+		htmlContent, err := a.fetchLobsteComments(rawURL)
 		if err != nil {
 			jsonError(w, err.Error(), http.StatusBadGateway)
 			return
@@ -160,7 +160,7 @@ func commentsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if strings.Contains(rawURL, ".json") {
-		htmlContent, err := fetchRedditComments(rawURL)
+		htmlContent, err := a.fetchRedditComments(rawURL)
 		if err != nil {
 			jsonError(w, err.Error(), http.StatusBadGateway)
 			return
@@ -170,7 +170,7 @@ func commentsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Non-Reddit/HN: extract with Readability
-	article, err := fetchReadable(rawURL)
+	article, err := a.fetchReadable(rawURL)
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusBadGateway)
 		return
@@ -180,7 +180,7 @@ func commentsHandler(w http.ResponseWriter, r *http.Request) {
 
 // ── HN ───────────────────────────────────────────────────────────────────────
 
-func fetchHNComments(rawURL string) (string, error) {
+func (a *App) fetchHNComments(rawURL string) (string, error) {
 	// Extract item ID from URL like https://news.ycombinator.com/item?id=12345
 	idx := strings.Index(rawURL, "?id=")
 	if idx < 0 {
@@ -195,7 +195,7 @@ func fetchHNComments(rawURL string) (string, error) {
 	}
 
 	algoliaURL := "https://hn.algolia.com/api/v1/items/" + itemID
-	client := newScrappingClient(ScrappingClientConfig{Timeout: 30 * time.Second, WithProxy: true, UseProxyFirst: true})
+	client := a.newScrappingClient(ScrappingClientConfig{Timeout: 30 * time.Second, WithProxy: true, UseProxyFirst: true})
 	hnReq, err := http.NewRequest("GET", algoliaURL, nil)
 	if err != nil {
 		return "", err
@@ -283,8 +283,8 @@ func renderHNComment(sb *strings.Builder, item hnItem, depth int, counter *int, 
 
 // ── Reddit ───────────────────────────────────────────────────────────────────
 
-func fetchRedditComments(rawURL string) (string, error) {
-	client := newScrappingClient(ScrappingClientConfig{Timeout: 30 * time.Second, WithProxy: true, UseProxyFirst: true})
+func (a *App) fetchRedditComments(rawURL string) (string, error) {
+	client := a.newScrappingClient(ScrappingClientConfig{Timeout: 30 * time.Second, WithProxy: true, UseProxyFirst: true})
 	req, err := http.NewRequest("GET", rawURL, nil)
 	if err != nil {
 		return "", err
@@ -470,13 +470,13 @@ func renderLobstersComment(sb *strings.Builder, node *lobstersNode, counter *int
 	sb.WriteString(`</div>`) // hn-comment
 }
 
-func fetchLobsteComments(rawURL string) (string, error) {
+func (a *App) fetchLobsteComments(rawURL string) (string, error) {
 	jsonURL, err := lobstersJSONURL(rawURL)
 	if err != nil {
 		return "", err
 	}
 
-	client := newScrappingClient(ScrappingClientConfig{Timeout: 30 * time.Second, WithProxy: true, UseProxyFirst: true})
+	client := a.newScrappingClient(ScrappingClientConfig{Timeout: 30 * time.Second, WithProxy: true, UseProxyFirst: true})
 	req, err := http.NewRequest("GET", jsonURL, nil)
 	if err != nil {
 		return "", err

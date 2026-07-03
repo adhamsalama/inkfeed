@@ -15,13 +15,13 @@ func TestGetPreferencesFullyPopulated(t *testing.T) {
 	ctx := userContext(uid)
 
 	// Populate every related table.
-	preferencesHandler(httptest.NewRecorder(), putJSON("/preferences", `{"fontSize":1.1,"letterSpacing":0.1,"lineHeight":1.2,"corsProxyUrl":"http://p","epubEmbedImages":true,"mobiEmbedImages":false,"emailTo":"e@x.com","fontFamily":"serif","boldText":true,"darkMode":false}`, uid))
-	savedFeedsHandler(httptest.NewRecorder(), putJSON("/saved-feeds", `[{"url":"u1","title":"t1","archiveEnabled":true}]`, uid))
-	feedGroupsHandler(httptest.NewRecorder(), putJSON("/feed-groups", `[{"name":"G","feeds":[{"url":"gu","title":"gt"},{"url":"gu2","title":"gt2"}]}]`, uid))
-	favoritesHandler(httptest.NewRecorder(), putJSON("/favorites", `[{"url":"fu","title":"ft","feedTitle":"feed","pubDate":"pd","commentsUrl":"cu"}]`, uid))
+	app.preferencesHandler(httptest.NewRecorder(), putJSON("/preferences", `{"fontSize":1.1,"letterSpacing":0.1,"lineHeight":1.2,"corsProxyUrl":"http://p","epubEmbedImages":true,"mobiEmbedImages":false,"emailTo":"e@x.com","fontFamily":"serif","boldText":true,"darkMode":false}`, uid))
+	app.savedFeedsHandler(httptest.NewRecorder(), putJSON("/saved-feeds", `[{"url":"u1","title":"t1","archiveEnabled":true}]`, uid))
+	app.feedGroupsHandler(httptest.NewRecorder(), putJSON("/feed-groups", `[{"name":"G","feeds":[{"url":"gu","title":"gt"},{"url":"gu2","title":"gt2"}]}]`, uid))
+	app.favoritesHandler(httptest.NewRecorder(), putJSON("/favorites", `[{"url":"fu","title":"ft","feedTitle":"feed","pubDate":"pd","commentsUrl":"cu"}]`, uid))
 
 	w := httptest.NewRecorder()
-	preferencesHandler(w, httptest.NewRequest(http.MethodGet, "/preferences", nil).WithContext(ctx))
+	app.preferencesHandler(w, httptest.NewRequest(http.MethodGet, "/preferences", nil).WithContext(ctx))
 	if w.Code != http.StatusOK {
 		t.Fatalf("GET = %d", w.Code)
 	}
@@ -51,12 +51,12 @@ func TestMultiArticleWithFailingURL(t *testing.T) {
 	})
 	setProxyURL(t, srv.URL)
 
-	combined := fetchAndCombine([]string{"https://example.com/good", "https://bad.invalid/x"}, "Mix")
+	combined := app.fetchAndCombine([]string{"https://example.com/good", "https://bad.invalid/x"}, "Mix")
 	if !strings.Contains(combined, "Failed to fetch article") {
 		t.Errorf("expected failure marker in mobi combine: %s", combined[:min(200, len(combined))])
 	}
 
-	body := buildEpubMultiArticleBody([]string{"https://example.com/good", "https://bad.invalid/x"}, "Mix")
+	body := app.buildEpubMultiArticleBody([]string{"https://example.com/good", "https://bad.invalid/x"}, "Mix")
 	if !strings.Contains(body, "Failed to fetch article") {
 		t.Errorf("expected failure marker in epub body")
 	}
@@ -77,14 +77,14 @@ func TestEmailAndEpubSingleWithComments(t *testing.T) {
 
 	// epub with comments
 	w := httptest.NewRecorder()
-	epubHandler(w, postJSON("/epub", `{"url":"https://example.com/art","commentsUrl":"https://news.ycombinator.com/item?id=1","title":"WithComments","embedImages":false}`))
+	app.epubHandler(w, postJSON("/epub", `{"url":"https://example.com/art","commentsUrl":"https://news.ycombinator.com/item?id=1","title":"WithComments","embedImages":false}`))
 	if w.Code != http.StatusOK {
 		t.Fatalf("epub with comments = %d", w.Code)
 	}
 
 	// mobi single without TOC (no headings + no comments -> plain branch)
 	w = httptest.NewRecorder()
-	mobiHandler(w, postJSON("/mobi", `{"url":"https://example.com/art","title":"Plain","embedImages":false}`))
+	app.mobiHandler(w, postJSON("/mobi", `{"url":"https://example.com/art","title":"Plain","embedImages":false}`))
 	if w.Code != http.StatusOK {
 		t.Errorf("plain mobi = %d", w.Code)
 	}
@@ -96,12 +96,12 @@ func TestEmailAndEpubSingleWithComments(t *testing.T) {
 	brevoAPIURL = emailSrv.URL
 
 	w = httptest.NewRecorder()
-	emailHandler(w, postJSON("/email", `{"url":"https://example.com/art","to":"k@k.com","commentsUrl":"https://news.ycombinator.com/item?id=1","embedImages":false}`))
+	app.emailHandler(w, postJSON("/email", `{"url":"https://example.com/art","to":"k@k.com","commentsUrl":"https://news.ycombinator.com/item?id=1","embedImages":false}`))
 	if w.Code != http.StatusOK {
 		t.Errorf("email epub w/comments = %d", w.Code)
 	}
 	w = httptest.NewRecorder()
-	emailHandler(w, postJSON("/email", `{"url":"https://example.com/art","to":"k@k.com","format":"mobi","commentsUrl":"https://news.ycombinator.com/item?id=1","embedImages":false}`))
+	app.emailHandler(w, postJSON("/email", `{"url":"https://example.com/art","to":"k@k.com","format":"mobi","commentsUrl":"https://news.ycombinator.com/item?id=1","embedImages":false}`))
 	if w.Code != http.StatusOK {
 		t.Errorf("email mobi w/comments = %d", w.Code)
 	}
@@ -113,18 +113,18 @@ func TestPruneArticleArchiveLoop(t *testing.T) {
 	// so the pruning loop runs and deletes down to target.
 	big := strings.Repeat("A", 20*1024*1024) // 20MB per field
 	for i := 0; i < 3; i++ {
-		archiveArticle(
+		app.archiveArticle(
 			"bigkey-"+string(rune('a'+i)),
 			"T", "au", "s", "2024", big, big,
 		)
 	}
 	// 3 rows * 40MB = 120MB > 90MB target -> at least one row pruned.
-	before, _ := queries.GetArticleArchiveTotalSize(context.Background())
+	before, _ := app.q.GetArticleArchiveTotalSize(context.Background())
 	if before <= archivePruneTargetBytes {
 		t.Fatalf("setup size %d not above target", before)
 	}
-	pruneArticleArchive()
-	after, _ := queries.GetArticleArchiveTotalSize(context.Background())
+	app.pruneArticleArchive()
+	after, _ := app.q.GetArticleArchiveTotalSize(context.Background())
 	if after > before {
 		t.Errorf("prune increased size?")
 	}

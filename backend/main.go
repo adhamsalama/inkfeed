@@ -8,25 +8,16 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"strings"
 
 	"github.com/adhamsalama/inkfeed-backend/db"
 	"github.com/joho/godotenv"
 	_ "modernc.org/sqlite"
 )
 
-var queries *db.Queries
-
-var allowedOrigins = []string{"https://reader.inkfeed.xyz", "http://reader.inkfeed.xyz", "http://localhost:9999"}
-
-var feedProxyURL = "https://throbbing-morning-e187.adhamsalama.workers.dev"
-
 type contextKey string
 
-const userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-
-func isAllowedOrigin(origin string) bool {
-	for _, o := range allowedOrigins {
+func (a *App) isAllowedOrigin(origin string) bool {
+	for _, o := range a.allowedOrigins {
 		if o == origin {
 			return true
 		}
@@ -34,10 +25,10 @@ func isAllowedOrigin(origin string) bool {
 	return false
 }
 
-func corsMiddleware(next http.Handler) http.Handler {
+func (a *App) corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
-		if !isAllowedOrigin(origin) {
+		if !a.isAllowedOrigin(origin) {
 			http.Error(w, "Forbidden", http.StatusForbidden)
 			return
 		}
@@ -76,20 +67,6 @@ func jsonError(w http.ResponseWriter, message string, code int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(map[string]string{"error": message})
-}
-
-// applyEnvConfig reads process configuration from environment variables. It is
-// separated from main so it can be exercised in tests.
-func applyEnvConfig() {
-	if v := os.Getenv("ALLOWED_ORIGINS"); v != "" {
-		allowedOrigins = strings.Split(v, ",")
-	}
-	if os.Getenv("ENV") == "local" {
-		allowedOrigins = append(allowedOrigins, "http://localhost:8000")
-	}
-	if v := os.Getenv("FEED_PROXY_URL"); v != "" {
-		feedProxyURL = v
-	}
 }
 
 // setupDB opens the SQLite database at path, applies pragmas, and runs the
@@ -191,46 +168,45 @@ func setupDB(path string) (*sql.DB, error) {
 
 // startBackgroundJobs launches the periodic goroutines (feed scraping, content
 // archiving, cache cleanup, and pruning).
-func startBackgroundJobs() {
-	startFeedScraper()
-	startContentArchiver()
-	startCacheCleanup()
-	startArticleArchivePruner()
-	startFeedItemsPruner()
+func (a *App) startBackgroundJobs() {
+	a.startFeedScraper()
+	a.startContentArchiver()
+	a.startCacheCleanup()
+	a.startArticleArchivePruner()
+	a.startFeedItemsPruner()
 }
 
 // newServeMux builds the HTTP router with all routes and their middleware.
-func newServeMux() *http.ServeMux {
+func (a *App) newServeMux() *http.ServeMux {
 	mux := http.NewServeMux()
 	protected := func(h http.HandlerFunc) http.Handler {
-		return corsMiddleware(authMiddleware(rateLimitMiddleware(http.HandlerFunc(h))))
+		return a.corsMiddleware(a.authMiddleware(a.rateLimitMiddleware(http.HandlerFunc(h))))
 	}
 
-	mux.Handle("/signup", corsMiddleware(signupRateLimitMiddleware(http.HandlerFunc(signupHandler))))
-	mux.Handle("/signin", corsMiddleware(signinRateLimitMiddleware(http.HandlerFunc(signinHandler))))
-	mux.Handle("/signout", corsMiddleware(http.HandlerFunc(signoutHandler)))
-	mux.Handle("/change-password", corsMiddleware(authMiddleware(signinRateLimitMiddleware(http.HandlerFunc(changePasswordHandler)))))
-	mux.Handle("/preferences", protected(preferencesHandler))
-	mux.Handle("/saved-feeds", protected(savedFeedsHandler))
-	mux.Handle("/feed-groups", protected(feedGroupsHandler))
-	mux.Handle("/favorites", protected(favoritesHandler))
-	mux.Handle("/feed", protected(cached(feedHandler)))
-	mux.Handle("/article", protected(cached(articleHandler)))
-	mux.Handle("/text", protected(textHandler))
-	mux.Handle("/comments", protected(cached(commentsHandler)))
-	mux.Handle("/mobi", protected(mobiHandler))
-	mux.Handle("/epub", protected(epubHandler))
-	mux.Handle("/reddit-post", protected(redditPostHandler))
+	mux.Handle("/signup", a.corsMiddleware(a.signupRateLimitMiddleware(http.HandlerFunc(a.signupHandler))))
+	mux.Handle("/signin", a.corsMiddleware(a.signinRateLimitMiddleware(http.HandlerFunc(a.signinHandler))))
+	mux.Handle("/signout", a.corsMiddleware(http.HandlerFunc(a.signoutHandler)))
+	mux.Handle("/change-password", a.corsMiddleware(a.authMiddleware(a.signinRateLimitMiddleware(http.HandlerFunc(a.changePasswordHandler)))))
+	mux.Handle("/preferences", protected(a.preferencesHandler))
+	mux.Handle("/saved-feeds", protected(a.savedFeedsHandler))
+	mux.Handle("/feed-groups", protected(a.feedGroupsHandler))
+	mux.Handle("/favorites", protected(a.favoritesHandler))
+	mux.Handle("/feed", protected(a.cached(a.feedHandler)))
+	mux.Handle("/article", protected(a.cached(a.articleHandler)))
+	mux.Handle("/text", protected(a.textHandler))
+	mux.Handle("/comments", protected(a.cached(a.commentsHandler)))
+	mux.Handle("/mobi", protected(a.mobiHandler))
+	mux.Handle("/epub", protected(a.epubHandler))
+	mux.Handle("/reddit-post", protected(a.redditPostHandler))
 	mux.Handle("/decode-google-news", protected(decodeGoogleNewsHandler))
-	mux.Handle("/email", corsMiddleware(authMiddleware(emailRateLimitMiddleware(http.HandlerFunc(emailHandler)))))
-	mux.Handle("/feed-archive", protected(feedArchiveHandler))
+	mux.Handle("/email", a.corsMiddleware(a.authMiddleware(a.emailRateLimitMiddleware(http.HandlerFunc(a.emailHandler)))))
+	mux.Handle("/feed-archive", protected(a.feedArchiveHandler))
 
 	return mux
 }
 
 func main() {
 	godotenv.Load()
-	applyEnvConfig()
 
 	port := flag.String("port", "8080", "port to listen on")
 	flag.Parse()
@@ -242,11 +218,12 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to set up database: %v", err)
 	}
-	queries = db.New(sqlDB)
 
-	startBackgroundJobs()
+	app := newApp(db.New(sqlDB))
+	app.applyEnvConfig()
+	app.startBackgroundJobs()
 
 	addr := ":" + *port
 	log.Printf("Server listening on %s", addr)
-	log.Fatal(http.ListenAndServe(addr, loggingMiddleware(newServeMux())))
+	log.Fatal(http.ListenAndServe(addr, loggingMiddleware(app.newServeMux())))
 }

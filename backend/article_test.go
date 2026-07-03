@@ -98,7 +98,7 @@ func TestDedupeResponsiveImages(t *testing.T) {
 
 func TestFetchReadable(t *testing.T) {
 	serveArticleViaProxy(t, articleHTML)
-	a, err := fetchReadable("https://example.com/post")
+	a, err := app.fetchReadable("https://example.com/post")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +112,7 @@ func TestFetchReadable(t *testing.T) {
 
 func TestFetchReadableError(t *testing.T) {
 	setProxyURL(t, "http://127.0.0.1:0/dead")
-	if _, err := fetchReadable("http://127.0.0.1:0/dead"); err == nil {
+	if _, err := app.fetchReadable("http://127.0.0.1:0/dead"); err == nil {
 		t.Error("expected error")
 	}
 }
@@ -120,14 +120,14 @@ func TestFetchReadableError(t *testing.T) {
 func TestTextHandler(t *testing.T) {
 	// missing url
 	w := httptest.NewRecorder()
-	textHandler(w, httptest.NewRequest(http.MethodGet, "/text", nil))
+	app.textHandler(w, httptest.NewRequest(http.MethodGet, "/text", nil))
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("missing url = %d", w.Code)
 	}
 
 	serveArticleViaProxy(t, articleHTML)
 	w = httptest.NewRecorder()
-	textHandler(w, httptest.NewRequest(http.MethodGet, "/text?url=https://example.com/post", nil))
+	app.textHandler(w, httptest.NewRequest(http.MethodGet, "/text?url=https://example.com/post", nil))
 	if w.Code != http.StatusOK {
 		t.Fatalf("text = %d", w.Code)
 	}
@@ -141,7 +141,7 @@ func TestTextHandler(t *testing.T) {
 	// error path
 	setProxyURL(t, "http://127.0.0.1:0/dead")
 	w = httptest.NewRecorder()
-	textHandler(w, httptest.NewRequest(http.MethodGet, "/text?url=http://127.0.0.1:0/dead", nil))
+	app.textHandler(w, httptest.NewRequest(http.MethodGet, "/text?url=http://127.0.0.1:0/dead", nil))
 	if w.Code != http.StatusBadGateway {
 		t.Errorf("text error = %d", w.Code)
 	}
@@ -152,7 +152,7 @@ func TestArticleHandler(t *testing.T) {
 
 	// missing url
 	w := httptest.NewRecorder()
-	articleHandler(w, httptest.NewRequest(http.MethodGet, "/article", nil))
+	app.articleHandler(w, httptest.NewRequest(http.MethodGet, "/article", nil))
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("missing url = %d", w.Code)
 	}
@@ -160,7 +160,7 @@ func TestArticleHandler(t *testing.T) {
 	// cache miss -> fetch + archive
 	serveArticleViaProxy(t, articleHTML)
 	w = httptest.NewRecorder()
-	articleHandler(w, httptest.NewRequest(http.MethodGet, "/article?url=https://example.com/a1", nil))
+	app.articleHandler(w, httptest.NewRequest(http.MethodGet, "/article?url=https://example.com/a1", nil))
 	if w.Code != http.StatusOK {
 		t.Fatalf("article = %d", w.Code)
 	}
@@ -171,9 +171,9 @@ func TestArticleHandler(t *testing.T) {
 	}
 
 	// Give the background archive goroutine time, then insert directly to test hit.
-	archiveArticle("https://example.com/cached", "Cached Title", "Auth", "Site", "2024", "<p>body</p>", "body words here")
+	app.archiveArticle("https://example.com/cached", "Cached Title", "Auth", "Site", "2024", "<p>body</p>", "body words here")
 	w = httptest.NewRecorder()
-	articleHandler(w, httptest.NewRequest(http.MethodGet, "/article?url=https://example.com/cached", nil))
+	app.articleHandler(w, httptest.NewRequest(http.MethodGet, "/article?url=https://example.com/cached", nil))
 	if w.Code != http.StatusOK {
 		t.Fatalf("cached article = %d", w.Code)
 	}
@@ -185,7 +185,7 @@ func TestArticleHandler(t *testing.T) {
 	// error path
 	setProxyURL(t, "http://127.0.0.1:0/dead")
 	w = httptest.NewRecorder()
-	articleHandler(w, httptest.NewRequest(http.MethodGet, "/article?url=http://127.0.0.1:0/dead", nil))
+	app.articleHandler(w, httptest.NewRequest(http.MethodGet, "/article?url=http://127.0.0.1:0/dead", nil))
 	if w.Code != http.StatusBadGateway {
 		t.Errorf("article error = %d", w.Code)
 	}
@@ -194,10 +194,10 @@ func TestArticleHandler(t *testing.T) {
 func TestArchiveAndPrune(t *testing.T) {
 	resetDB(t)
 	// Nothing to prune when under target.
-	pruneArticleArchive()
+	app.pruneArticleArchive()
 
-	archiveArticle("k1", "T", "A", "S", "2024", "<p>hi</p>", "hi there")
-	row, err := queries.GetArticleArchive(context.Background(), "k1")
+	app.archiveArticle("k1", "T", "A", "S", "2024", "<p>hi</p>", "hi there")
+	row, err := app.q.GetArticleArchive(context.Background(), "k1")
 	if err != nil || row.Title != "T" {
 		t.Fatalf("archive not written: %v", err)
 	}

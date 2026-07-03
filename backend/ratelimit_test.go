@@ -39,19 +39,19 @@ func okHandler() http.Handler {
 
 func TestRateLimitMiddleware(t *testing.T) {
 	// Isolate global state for this test.
-	rateLimitMu.Lock()
-	rateLimitHits = map[string][]time.Time{}
-	origMax := rateLimitMax
-	rateLimitMax = 3
-	rateLimitMu.Unlock()
+	app.rlMu.Lock()
+	app.rlHits = map[string][]time.Time{}
+	origMax := app.rlMax
+	app.rlMax = 3
+	app.rlMu.Unlock()
 	defer func() {
-		rateLimitMu.Lock()
-		rateLimitMax = origMax
-		rateLimitHits = map[string][]time.Time{}
-		rateLimitMu.Unlock()
+		app.rlMu.Lock()
+		app.rlMax = origMax
+		app.rlHits = map[string][]time.Time{}
+		app.rlMu.Unlock()
 	}()
 
-	h := rateLimitMiddleware(okHandler())
+	h := app.rateLimitMiddleware(okHandler())
 	do := func() int {
 		w := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -70,11 +70,11 @@ func TestRateLimitMiddleware(t *testing.T) {
 }
 
 func TestEmailRateLimitMiddleware(t *testing.T) {
-	emailRateLimitMu.Lock()
-	emailRateLimitHits = map[string]time.Time{}
-	emailRateLimitMu.Unlock()
+	app.emailRlMu.Lock()
+	app.emailRlHits = map[string]time.Time{}
+	app.emailRlMu.Unlock()
 
-	h := emailRateLimitMiddleware(okHandler())
+	h := app.emailRateLimitMiddleware(okHandler())
 	do := func() int {
 		w := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -97,13 +97,13 @@ func TestDBRateLimit(t *testing.T) {
 	ip := "7.7.7.7"
 
 	// First call: creates a row, allowed.
-	if !dbRateLimit(ctx, &mu, ip, "signin", 3, time.Hour, time.Hour) {
+	if !app.dbRateLimit(ctx, &mu, ip, "signin", 3, time.Hour, time.Hour) {
 		t.Fatal("first call should be allowed")
 	}
 	// Up to the limit: allowed.
 	allowed := 1
 	for i := 0; i < 2; i++ {
-		if dbRateLimit(ctx, &mu, ip, "signin", 3, time.Hour, time.Hour) {
+		if app.dbRateLimit(ctx, &mu, ip, "signin", 3, time.Hour, time.Hour) {
 			allowed++
 		}
 	}
@@ -111,11 +111,11 @@ func TestDBRateLimit(t *testing.T) {
 		t.Fatalf("expected 3 allowed, got %d", allowed)
 	}
 	// Next call exceeds -> blocked.
-	if dbRateLimit(ctx, &mu, ip, "signin", 3, time.Hour, time.Hour) {
+	if app.dbRateLimit(ctx, &mu, ip, "signin", 3, time.Hour, time.Hour) {
 		t.Error("4th call should be blocked")
 	}
 	// Once blocked, still blocked.
-	if dbRateLimit(ctx, &mu, ip, "signin", 3, time.Hour, time.Hour) {
+	if app.dbRateLimit(ctx, &mu, ip, "signin", 3, time.Hour, time.Hour) {
 		t.Error("call while blocked should be denied")
 	}
 }
@@ -125,12 +125,12 @@ func TestDBRateLimitWindowReset(t *testing.T) {
 	var mu sync.Mutex
 	ctx := context.Background()
 	// Very short window so it resets between calls.
-	if !dbRateLimit(ctx, &mu, "8.8.8.8", "signup", 1, time.Nanosecond, time.Hour) {
+	if !app.dbRateLimit(ctx, &mu, "8.8.8.8", "signup", 1, time.Nanosecond, time.Hour) {
 		t.Fatal("first allowed")
 	}
 	time.Sleep(2 * time.Millisecond)
 	// Window elapsed -> count resets to 1, allowed again.
-	if !dbRateLimit(ctx, &mu, "8.8.8.8", "signup", 1, time.Nanosecond, time.Hour) {
+	if !app.dbRateLimit(ctx, &mu, "8.8.8.8", "signup", 1, time.Nanosecond, time.Hour) {
 		t.Error("should be allowed after window reset")
 	}
 }
@@ -141,7 +141,7 @@ func TestSignupSigninRateLimitMiddleware(t *testing.T) {
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/signup", nil)
 	req.RemoteAddr = "10.0.0.1:1"
-	signupRateLimitMiddleware(okHandler()).ServeHTTP(w, req)
+	app.signupRateLimitMiddleware(okHandler()).ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Errorf("signup rl = %d", w.Code)
 	}
@@ -149,7 +149,7 @@ func TestSignupSigninRateLimitMiddleware(t *testing.T) {
 	w = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodPost, "/signin", nil)
 	req.RemoteAddr = "10.0.0.2:1"
-	signinRateLimitMiddleware(okHandler()).ServeHTTP(w, req)
+	app.signinRateLimitMiddleware(okHandler()).ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Errorf("signin rl = %d", w.Code)
 	}
@@ -157,11 +157,11 @@ func TestSignupSigninRateLimitMiddleware(t *testing.T) {
 
 func TestSigninRateLimitMiddlewareBlocks(t *testing.T) {
 	resetDB(t)
-	origMax := signinRateLimitMax
-	signinRateLimitMax = 1
-	defer func() { signinRateLimitMax = origMax }()
+	origMax := app.signinRlMax
+	app.signinRlMax = 1
+	defer func() { app.signinRlMax = origMax }()
 
-	h := signinRateLimitMiddleware(okHandler())
+	h := app.signinRateLimitMiddleware(okHandler())
 	do := func() int {
 		w := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodPost, "/signin", nil)

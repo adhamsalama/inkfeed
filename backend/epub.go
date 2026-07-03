@@ -31,7 +31,7 @@ type EpubRequest struct {
 	EmbedImages *bool    `json:"embedImages"`
 }
 
-func epubHandler(w http.ResponseWriter, r *http.Request) {
+func (a *App) epubHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		jsonError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -47,7 +47,7 @@ func epubHandler(w http.ResponseWriter, r *http.Request) {
 
 	switch {
 	case req.URL != "":
-		article, err := fetchReadable(req.URL)
+		article, err := a.fetchReadable(req.URL)
 		if err != nil {
 			jsonError(w, err.Error(), http.StatusBadGateway)
 			return
@@ -55,7 +55,7 @@ func epubHandler(w http.ResponseWriter, r *http.Request) {
 		if req.Title == "" {
 			req.Title = article.Title
 		}
-		commentsHTML := fetchCommentsHTML(req.CommentsURL)
+		commentsHTML := a.fetchCommentsHTML(req.CommentsURL)
 		link := `<p><a href="` + html.EscapeString(req.URL) + `">` + html.EscapeString(req.URL) + `</a></p>`
 		xhtmlBody = "<h1>" + html.EscapeString(req.Title) + "</h1>" + link + articleMetaHTML(article) + article.Content
 		if commentsHTML != "" {
@@ -63,7 +63,7 @@ func epubHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 	case len(req.URLs) > 0:
-		xhtmlBody = buildEpubMultiArticleBody(req.URLs, req.Title)
+		xhtmlBody = a.buildEpubMultiArticleBody(req.URLs, req.Title)
 
 	default:
 		jsonError(w, "url or urls field required", http.StatusBadRequest)
@@ -88,7 +88,7 @@ func epubHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write(data)
 }
 
-func buildEpubMultiArticleBody(urls []string, feedTitle string) string {
+func (a *App) buildEpubMultiArticleBody(urls []string, feedTitle string) string {
 	// Reuse the same concurrent fetch logic as MOBI
 	type result struct {
 		index   int
@@ -108,7 +108,7 @@ func buildEpubMultiArticleBody(urls []string, feedTitle string) string {
 		go func(idx int, url string) {
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			article, err := fetchReadable(url)
+			article, err := a.fetchReadable(url)
 			if err != nil {
 				resultCh <- result{index: idx, err: err}
 			} else {

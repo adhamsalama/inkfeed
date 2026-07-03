@@ -13,8 +13,9 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// testDB is the shared *sql.DB backing the global queries during tests.
+// testDB is the shared *sql.DB and app is the shared App under test.
 var testDB *sql.DB
+var app *App
 
 // TestMain sets up an on-disk SQLite database (so a single connection keeps the
 // schema between calls) initialized from db/schema.sql, and wires it into the
@@ -45,7 +46,7 @@ func TestMain(m *testing.M) {
 	}
 
 	testDB = sqlDB
-	queries = db.New(sqlDB)
+	app = newApp(db.New(sqlDB))
 
 	code := m.Run()
 	sqlDB.Close()
@@ -70,7 +71,7 @@ func resetDB(t *testing.T) {
 // createTestUser inserts a user and returns its ID.
 func createTestUser(t *testing.T, email string) int64 {
 	t.Helper()
-	u, err := queries.CreateUser(context.Background(), db.CreateUserParams{
+	u, err := app.q.CreateUser(context.Background(), db.CreateUserParams{
 		Email:        email,
 		PasswordHash: "$2a$10$fakehashfakehashfakehashfakehashfakehashfakehashfa",
 	})
@@ -93,7 +94,7 @@ func savedFeedParams(userID int64, url string) db.InsertUserSavedFeedParams {
 // scrapeFeedInsert inserts a single feed_items row directly.
 func scrapeFeedInsert(t *testing.T, feedURL, itemURL string) {
 	t.Helper()
-	if _, err := queries.InsertFeedItem(context.Background(), db.InsertFeedItemParams{
+	if _, err := app.q.InsertFeedItem(context.Background(), db.InsertFeedItemParams{
 		FeedUrl: feedURL, ItemUrl: itemURL, Title: "T", Description: "D", PubDate: "2024-01-01T00:00:00Z",
 	}); err != nil {
 		t.Fatalf("scrapeFeedInsert: %v", err)
@@ -116,9 +117,9 @@ func userContext(userID int64) context.Context {
 // exercises the network code paths without hitting the internet.
 func setProxyURL(t *testing.T, url string) {
 	t.Helper()
-	prev := feedProxyURL
-	feedProxyURL = url
-	t.Cleanup(func() { feedProxyURL = prev })
+	prev := app.proxyURL
+	app.proxyURL = url
+	t.Cleanup(func() { app.proxyURL = prev })
 }
 
 // newTestServer is a thin wrapper around httptest.NewServer registered for

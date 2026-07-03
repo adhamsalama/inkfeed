@@ -265,7 +265,7 @@ type EmailRequest struct {
 	EmbedImages *bool    `json:"embedImages"`
 }
 
-func emailHandler(w http.ResponseWriter, r *http.Request) {
+func (a *App) emailHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		jsonError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -295,7 +295,7 @@ func emailHandler(w http.ResponseWriter, r *http.Request) {
 		msg.Subject = "Your exported articles are ready"
 		switch req.Format {
 		case "mobi":
-			htmlContent := fetchAndCombine(req.URLs, title)
+			htmlContent := a.fetchAndCombine(req.URLs, title)
 			embedImagesMobi := req.EmbedImages == nil || *req.EmbedImages
 			var mobiImgRecords [][]byte
 			if embedImagesMobi {
@@ -313,7 +313,7 @@ func emailHandler(w http.ResponseWriter, r *http.Request) {
 				MimeType: "application/x-mobipocket-ebook",
 			}}
 		default: // epub
-			xhtmlBody := buildEpubMultiArticleBody(req.URLs, title)
+			xhtmlBody := a.buildEpubMultiArticleBody(req.URLs, title)
 			data, err := generateEpub(title, req.Author, xhtmlBody, req.EmbedImages == nil || *req.EmbedImages)
 			if err != nil {
 				jsonError(w, err.Error(), http.StatusInternalServerError)
@@ -336,7 +336,7 @@ func emailHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	article, err := fetchReadable(req.URL)
+	article, err := a.fetchReadable(req.URL)
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusBadGateway)
 		return
@@ -351,7 +351,7 @@ func emailHandler(w http.ResponseWriter, r *http.Request) {
 	if req.CommentsURL != "" {
 		links += `<p><a href="` + html.EscapeString(req.CommentsURL) + `">Comments</a></p>`
 	}
-	commentsHTML := fetchCommentsHTML(req.CommentsURL)
+	commentsHTML := a.fetchCommentsHTML(req.CommentsURL)
 	meta := articleMetaHTML(article)
 	articleHTML := "<html><body><h1>" + html.EscapeString(title) + "</h1>" + links + meta + article.Content
 	if commentsHTML != "" {
@@ -409,4 +409,3 @@ func emailHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]bool{"success": true})
 }
-

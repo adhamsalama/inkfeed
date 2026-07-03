@@ -77,7 +77,7 @@ func TestMobiHandlerWithTOCAndComments(t *testing.T) {
 	// comments will route to HN; the proxy server returns article HTML for the
 	// algolia request which fails JSON parse -> empty comments; still fine.
 	w := httptest.NewRecorder()
-	mobiHandler(w, postJSON("/mobi", body))
+	app.mobiHandler(w, postJSON("/mobi", body))
 	if w.Code != http.StatusOK {
 		t.Fatalf("mobi with toc = %d body=%s", w.Code, w.Body.String())
 	}
@@ -120,7 +120,7 @@ func TestFetchCommentsHTMLRedditAndLobsters(t *testing.T) {
 		w.Write([]byte(`[{"data":{"children":[]}},{"data":{"children":[{"kind":"t1","data":{"author":"u","body_html":"c","created_utc":1}}]}}]`))
 	})
 	setProxyURL(t, srvR.URL)
-	if !strings.Contains(fetchCommentsHTML("https://reddit.com/x/.json"), "u") {
+	if !strings.Contains(app.fetchCommentsHTML("https://reddit.com/x/.json"), "u") {
 		t.Error("reddit routing failed")
 	}
 
@@ -129,7 +129,7 @@ func TestFetchCommentsHTMLRedditAndLobsters(t *testing.T) {
 		w.Write([]byte(`{"comments":[{"short_id":"a","comment":"hi","commenting_user":"lob","created_at":"2024-01-01T00:00:00Z"}]}`))
 	})
 	setProxyURL(t, srvL.URL)
-	if !strings.Contains(fetchCommentsHTML("https://lobste.rs/s/abc/title"), "lob") {
+	if !strings.Contains(app.fetchCommentsHTML("https://lobste.rs/s/abc/title"), "lob") {
 		t.Error("lobsters routing failed")
 	}
 }

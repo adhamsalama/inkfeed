@@ -83,7 +83,7 @@ func TestFetchHNCommentsCollapse(t *testing.T) {
 		w.Write([]byte(json))
 	})
 	setProxyURL(t, srv.URL)
-	out, err := fetchHNComments("https://news.ycombinator.com/item?id=1")
+	out, err := app.fetchHNComments("https://news.ycombinator.com/item?id=1")
 	if err != nil {
 		t.Fatal(err)
 	}
