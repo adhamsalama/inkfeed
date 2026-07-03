@@ -433,6 +433,7 @@ func mobiHandler(w http.ResponseWriter, r *http.Request) {
 		Title:   req.Title,
 		Author:  req.Author,
 		Content: htmlContent,
+		TOC:     buildMobiTOC(htmlContent),
 	}, imageRecords)
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusInternalServerError)
@@ -521,6 +522,31 @@ func fetchAndCombine(urls []string, feedTitle string) string {
 const mobiTOCPlaceholder = "0000000000"
 
 var mobiTOCAnchorRe = regexp.MustCompile(`<a name="inkfeed-toc-(\d+)"></a>`)
+var mobiTOCLabelRe = regexp.MustCompile(`(?s)<h2>(.*?)</h2>`)
+var mobiTagStripRe = regexp.MustCompile(`<[^>]*>`)
+
+// buildMobiTOC extracts NCX navigation points from the finalized HTML: one per
+// <a name="inkfeed-toc-N"> anchor, at that anchor's byte offset, labelled with
+// the text of the <h2> heading that follows it. The byte offsets match the
+// filepos values patched into the inline Contents list, so the device TOC and
+// the inline links land in the same place.
+func buildMobiTOC(htmlContent string) []mobi.TOCEntry {
+	matches := mobiTOCAnchorRe.FindAllStringIndex(htmlContent, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+	toc := make([]mobi.TOCEntry, 0, len(matches))
+	for _, m := range matches {
+		label := "Article"
+		if lm := mobiTOCLabelRe.FindStringSubmatch(htmlContent[m[1]:]); lm != nil {
+			if text := strings.TrimSpace(html.UnescapeString(mobiTagStripRe.ReplaceAllString(lm[1], ""))); text != "" {
+				label = text
+			}
+		}
+		toc = append(toc, mobi.TOCEntry{Offset: m[0], Label: label})
+	}
+	return toc
+}
 
 // patchMobiTOCFilepos rewrites the placeholder filepos values in the table of
 // contents to the byte offsets of their matching <a name="inkfeed-toc-N">

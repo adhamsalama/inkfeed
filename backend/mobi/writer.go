@@ -12,6 +12,7 @@ const (
 	palmDocHeaderSize = 16
 	palmDbHeaderSize  = 78
 	recordInfoSize    = 8
+	indxHeaderLen     = 192
 
 	exthAuthor              = 100
 	exthCreatorSoftware     = 204
@@ -24,7 +25,8 @@ const (
 type Book struct {
 	Title   string
 	Author  string
-	Content string // HTML content (UTF-8)
+	Content string     // HTML content (UTF-8)
+	TOC     []TOCEntry // optional navigation points for the NCX table of contents
 }
 
 // Write generates a MOBI file and returns the raw bytes.
@@ -48,10 +50,18 @@ func Write(book Book, imageRecords [][]byte) ([]byte, error) {
 		textRecords = append(textRecords, []byte{0})
 	}
 
+	// Build the NCX table-of-contents index records (master INDX + data INDX +
+	// CNCX). These sit between the text and image records; the MOBI header then
+	// points at the master INDX record so Kindle exposes a real TOC.
+	var ncxRecords [][]byte
+	if len(book.TOC) > 0 {
+		ncxRecords = buildNCXRecords(book.TOC, len(htmlBytes))
+	}
+
 	exthData := generateExthHeader(book.Author)
 	palmDocData := generatePalmDocHeader(len(htmlBytes), len(textRecords))
 	titleBytes := []byte(book.Title)
-	mobiData := generateMobiHeader(palmDocHeaderSize, len(exthData), len(titleBytes), len(textRecords), len(imageRecords))
+	mobiData := generateMobiHeader(palmDocHeaderSize, len(exthData), len(titleBytes), len(textRecords), len(ncxRecords), len(imageRecords))
 
 	// Record 0: PalmDocHeader + MobiHeader + ExthHeader + padded title
 	record0 := concat(palmDocData, mobiData, exthData)
@@ -59,9 +69,10 @@ func Write(book Book, imageRecords [][]byte) ([]byte, error) {
 	record0 = append(record0, titleBytes...)
 	record0 = append(record0, make([]byte, titlePadding+2)...)
 
-	// Records: header, text, images, EOF
+	// Records: header, text, NCX index, images, EOF
 	records := [][]byte{record0}
 	records = append(records, textRecords...)
+	records = append(records, ncxRecords...)
 	records = append(records, imageRecords...)
 	records = append(records, []byte{0xe9, 0x8e, 0x0d, 0x0a}) // EOF record
 
@@ -156,7 +167,7 @@ func generatePalmDocHeader(textSize, textRecordCount int) []byte {
 // Fields with swapEndian=false in the JS source are written little-endian here.
 // All 0xFFFFFFFF fields are identical in both endiannesses; only
 // unknown_bytes_2=0x00000001 is materially little-endian.
-func generateMobiHeader(palmDocLen, exthLen, titleLen, textRecordsCount, imageRecordsCount int) []byte {
+func generateMobiHeader(palmDocLen, exthLen, titleLen, textRecordsCount, ncxRecordsCount, imageRecordsCount int) []byte {
 	h := make([]byte, mobiHeaderSize)
 	o := 0
 
@@ -198,7 +209,7 @@ func generateMobiHeader(palmDocLen, exthLen, titleLen, textRecordsCount, imageRe
 	o += 8 // dictionary_input/output_language: 0
 	binary.BigEndian.PutUint32(h[o:], 6) // minimum_mobipocket_version
 	o += 4
-	binary.BigEndian.PutUint32(h[o:], uint32(textRecordsCount+1)) // first_image_index
+	binary.BigEndian.PutUint32(h[o:], uint32(textRecordsCount+1+ncxRecordsCount)) // first_image_index
 	o += 4
 	o += 16 // huffman fields: 0
 	binary.BigEndian.PutUint32(h[o:], 80) // exth_flags
@@ -214,7 +225,7 @@ func generateMobiHeader(palmDocLen, exthLen, titleLen, textRecordsCount, imageRe
 
 	binary.BigEndian.PutUint16(h[o:], 1) // first_content_record_number
 	o += 2
-	binary.BigEndian.PutUint16(h[o:], uint16(textRecordsCount+imageRecordsCount)) // last_content_record_number
+	binary.BigEndian.PutUint16(h[o:], uint16(textRecordsCount+ncxRecordsCount+imageRecordsCount)) // last_content_record_number
 	o += 2
 
 	binary.LittleEndian.PutUint32(h[o:], 0x00000001) // unknown_bytes_2 (LE!)
@@ -238,7 +249,13 @@ func generateMobiHeader(palmDocLen, exthLen, titleLen, textRecordsCount, imageRe
 	o += 2 // unknown_bytes_8: zeroed
 	binary.BigEndian.PutUint16(h[o:], 1) // traildata_flags
 	o += 2
-	binary.LittleEndian.PutUint32(h[o:], 0xffffffff) // first_indx_record_number
+	// first_indx_record_number: points at the master NCX INDX record so Kindle
+	// exposes a Table of Contents. 0xFFFFFFFF when there is no TOC.
+	if ncxRecordsCount > 0 {
+		binary.BigEndian.PutUint32(h[o:], uint32(textRecordsCount+1))
+	} else {
+		binary.LittleEndian.PutUint32(h[o:], 0xffffffff)
+	}
 	// o += 4  (last field)
 
 	return h
