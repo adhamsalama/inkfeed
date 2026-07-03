@@ -54,8 +54,14 @@ func Write(book Book, imageRecords [][]byte) ([]byte, error) {
 		if end > len(htmlBytes) {
 			end = len(htmlBytes)
 		}
-		chunk := make([]byte, 0, end-i+8)
-		chunk = append(chunk, htmlBytes[i:end]...)
+		textChunk := htmlBytes[i:end]
+		if hasTOC {
+			// Kindle expects indexed content PalmDoc-compressed; offsets in the
+			// index/TBS remain into the uncompressed text, so they are unaffected.
+			textChunk = compressPalmDoc(textChunk)
+		}
+		chunk := make([]byte, 0, len(textChunk)+8)
+		chunk = append(chunk, textChunk...)
 		chunk = append(chunk, 0x00) // multibyte overlap trailing entry
 		if hasTOC {
 			content := tbs[r]
@@ -77,7 +83,7 @@ func Write(book Book, imageRecords [][]byte) ([]byte, error) {
 	}
 
 	exthData := generateExthHeader(book.Author)
-	palmDocData := generatePalmDocHeader(len(htmlBytes), len(textRecords))
+	palmDocData := generatePalmDocHeader(len(htmlBytes), len(textRecords), hasTOC)
 	titleBytes := []byte(book.Title)
 	mobiData := generateMobiHeader(palmDocHeaderSize, len(exthData), len(titleBytes), len(textRecords), len(ncxRecords), len(imageRecords), hasTOC)
 
@@ -177,9 +183,13 @@ func generateExthHeader(author string) []byte {
 	return buf
 }
 
-func generatePalmDocHeader(textSize, textRecordCount int) []byte {
+func generatePalmDocHeader(textSize, textRecordCount int, compressed bool) []byte {
 	h := make([]byte, palmDocHeaderSize)
-	binary.BigEndian.PutUint16(h[0:], 1)                              // compression: none
+	compression := uint16(1) // none
+	if compressed {
+		compression = 2 // PalmDoc
+	}
+	binary.BigEndian.PutUint16(h[0:], compression)                   // compression
 	binary.BigEndian.PutUint32(h[4:], uint32(textSize))               // text_length
 	binary.BigEndian.PutUint16(h[8:], uint16(textRecordCount))        // text_record_count
 	binary.BigEndian.PutUint16(h[10:], 4096)                          // text_max_record_size
