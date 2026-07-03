@@ -3,8 +3,8 @@ package mobi
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
 	"strconv"
+	"strings"
 )
 
 // TOCEntry is one navigation point in the MOBI NCX (table of contents).
@@ -154,6 +154,18 @@ func pad4(b []byte) []byte {
 	return b
 }
 
+// encodeNumberAsHex encodes an index entry's ordinal the way kindlegen/calibre
+// do: an uppercase hex string (zero-padded to even length) prefixed by its byte
+// length. This is the entry "name" the reader keys on, so it must be hex, not
+// decimal (e.g. entry 10 is "0A", not "10").
+func encodeNumberAsHex(num int) []byte {
+	s := strings.ToUpper(strconv.FormatInt(int64(num), 16))
+	if len(s)%2 != 0 {
+		s = "0" + s
+	}
+	return append([]byte{byte(len(s))}, []byte(s)...)
+}
+
 // flisRecord returns the fixed 36-byte FLIS record kindlegen/calibre emit.
 func flisRecord() []byte {
 	return []byte{
@@ -183,10 +195,6 @@ func fcisRecord(textLen int) []byte {
 // text stream, used to size the final entry's span.
 func buildNCXRecords(toc []TOCEntry, textLen int) [][]byte {
 	n := len(toc)
-	width := len(strconv.Itoa(n - 1))
-	if width < 2 {
-		width = 2
-	}
 
 	// CNCX: each label prefixed by its forward-varint byte length.
 	var cncx bytes.Buffer
@@ -210,9 +218,7 @@ func buildNCXRecords(toc []TOCEntry, textLen int) [][]byte {
 	entOffsets := make([]int, n)
 	for i, e := range toc {
 		entOffsets[i] = indxHeaderLen + ent.Len()
-		name := fmt.Sprintf("%0*d", width, i)
-		ent.WriteByte(byte(len(name)))
-		ent.WriteString(name)
+		ent.Write(encodeNumberAsHex(i))
 		ent.WriteByte(0x0f)
 		ent.Write(encVarForward(e.Offset))
 		size := textLen - e.Offset
@@ -258,10 +264,8 @@ func buildNCXRecords(toc []TOCEntry, textLen int) [][]byte {
 		0, 0, 0, 1, // end/control
 	}
 
-	lastName := fmt.Sprintf("%0*d", width, n-1)
 	var te bytes.Buffer
-	te.WriteByte(byte(len(lastName)))
-	te.WriteString(lastName)
+	te.Write(encodeNumberAsHex(n - 1))
 	te.WriteByte(0x00)
 	te.WriteByte(byte(n)) // count of entries in the data record
 	teStart := indxHeaderLen + len(tagx)
