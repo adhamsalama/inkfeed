@@ -3,6 +3,7 @@ package server
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/adhamsalama/inkfeed-backend/internal/email"
@@ -50,20 +51,46 @@ func TestEmailHandler(t *testing.T) {
 		t.Errorf("missing to = %d", w.Code)
 	}
 
-	useFakeSender(t)
+	f := useFakeSender(t)
 	serveArticleViaProxy(t, articleHTML)
 
-	cases := []string{
-		`{"url":"https://example.com/e1","to":"k@kindle.com","embedImages":false}`,
-		`{"url":"https://example.com/e2","to":"k@kindle.com","format":"mobi","embedImages":false}`,
-		`{"urls":["https://example.com/a","https://example.com/b"],"to":"k@kindle.com","author":"Bundle","embedImages":false}`,
-		`{"urls":["https://example.com/a","https://example.com/b"],"to":"k@kindle.com","format":"mobi","embedImages":false}`,
+	cases := []struct {
+		name        string
+		body        string
+		wantExt     string
+		wantMime    string
+		wantSubUniq string // distinguishing word in the subject
+	}{
+		{"single epub", `{"url":"https://example.com/e1","to":"k@kindle.com","embedImages":false}`, ".epub", "application/epub+zip", "article is"},
+		{"single mobi", `{"url":"https://example.com/e2","to":"k@kindle.com","format":"mobi","embedImages":false}`, ".mobi", "application/x-mobipocket-ebook", "article is"},
+		{"bulk epub", `{"urls":["https://example.com/a","https://example.com/b"],"to":"k@kindle.com","author":"Bundle","embedImages":false}`, ".epub", "application/epub+zip", "articles are"},
+		{"bulk mobi", `{"urls":["https://example.com/a","https://example.com/b"],"to":"k@kindle.com","format":"mobi","embedImages":false}`, ".mobi", "application/x-mobipocket-ebook", "articles are"},
 	}
-	for _, body := range cases {
+	for _, tc := range cases {
 		w = httptest.NewRecorder()
-		app.emailHandler(w, postJSON("/email", body))
+		app.emailHandler(w, postJSON("/email", tc.body))
 		if w.Code != http.StatusOK {
-			t.Fatalf("email %s = %d body=%s", body, w.Code, w.Body.String())
+			t.Fatalf("%s: %d body=%s", tc.name, w.Code, w.Body.String())
+		}
+		msg := f.last
+		if msg.To != "k@kindle.com" {
+			t.Errorf("%s: To = %q", tc.name, msg.To)
+		}
+		if !strings.Contains(msg.Subject, tc.wantSubUniq) {
+			t.Errorf("%s: subject = %q, want contains %q", tc.name, msg.Subject, tc.wantSubUniq)
+		}
+		if len(msg.Attachments) != 1 {
+			t.Fatalf("%s: attachments = %d", tc.name, len(msg.Attachments))
+		}
+		att := msg.Attachments[0]
+		if !strings.HasSuffix(att.Filename, tc.wantExt) {
+			t.Errorf("%s: filename = %q, want *%s", tc.name, att.Filename, tc.wantExt)
+		}
+		if att.MimeType != tc.wantMime {
+			t.Errorf("%s: mime = %q, want %q", tc.name, att.MimeType, tc.wantMime)
+		}
+		if len(att.Content) == 0 {
+			t.Errorf("%s: empty attachment content", tc.name)
 		}
 	}
 }

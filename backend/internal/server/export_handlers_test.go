@@ -1,6 +1,8 @@
 package server
 
 import (
+	"archive/zip"
+	"bytes"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -34,14 +36,23 @@ func TestMobiHandler(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("single mobi = %d body=%s", w.Code, w.Body.String())
 	}
-	if !strings.Contains(w.Header().Get("Content-Disposition"), ".mobi") {
-		t.Errorf("no mobi filename")
+	if !strings.Contains(w.Header().Get("Content-Disposition"), `"My MOBI.mobi"`) {
+		t.Errorf("disposition = %q", w.Header().Get("Content-Disposition"))
+	}
+	if w.Header().Get("Content-Type") != "application/x-mobipocket-ebook" {
+		t.Errorf("mime = %q", w.Header().Get("Content-Type"))
+	}
+	if !bytes.Contains(w.Body.Bytes(), []byte("BOOKMOBI")) {
+		t.Errorf("body is not a MOBI file (no BOOKMOBI signature)")
 	}
 	// bulk
 	w = httptest.NewRecorder()
 	app.mobiHandler(w, postJSON("/mobi", `{"urls":["https://example.com/a","https://example.com/b"],"title":"Bundle","embedImages":false}`))
 	if w.Code != http.StatusOK {
 		t.Errorf("bulk mobi = %d", w.Code)
+	}
+	if !strings.Contains(w.Header().Get("Content-Disposition"), "Bundle_") { // bulk adds a date
+		t.Errorf("bulk disposition = %q", w.Header().Get("Content-Disposition"))
 	}
 
 	// fetch error -> 502
@@ -71,7 +82,14 @@ func TestEpubHandler(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("single epub = %d", w.Code)
 	}
-	if !strings.Contains(w.Header().Get("Content-Disposition"), ".epub") {
-		t.Errorf("no epub filename")
+	if !strings.Contains(w.Header().Get("Content-Disposition"), `"E.epub"`) {
+		t.Errorf("disposition = %q", w.Header().Get("Content-Disposition"))
+	}
+	// EPUB is a zip archive -> starts with the "PK" local-file signature.
+	if !bytes.HasPrefix(w.Body.Bytes(), []byte("PK")) {
+		t.Errorf("body is not a zip/epub (no PK signature)")
+	}
+	if _, err := zip.NewReader(bytes.NewReader(w.Body.Bytes()), int64(w.Body.Len())); err != nil {
+		t.Errorf("epub not a valid zip: %v", err)
 	}
 }
