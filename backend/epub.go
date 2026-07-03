@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	_ "golang.org/x/image/webp"
-	"html"
 	"image"
 	"image/jpeg"
 	_ "image/png"
@@ -17,7 +15,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"time"
+
+	_ "golang.org/x/image/webp"
 
 	epub "github.com/go-shiori/go-epub"
 )
@@ -43,114 +42,29 @@ func (a *App) epubHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var xhtmlBody string
-
-	switch {
-	case req.URL != "":
-		article, err := a.fetchReadable(req.URL)
-		if err != nil {
-			jsonError(w, err.Error(), http.StatusBadGateway)
-			return
-		}
-		if req.Title == "" {
-			req.Title = article.Title
-		}
-		commentsHTML := a.fetchCommentsHTML(req.CommentsURL)
-		link := `<p><a href="` + html.EscapeString(req.URL) + `">` + html.EscapeString(req.URL) + `</a></p>`
-		xhtmlBody = "<h1>" + html.EscapeString(req.Title) + "</h1>" + link + articleMetaHTML(article) + article.Content
-		if commentsHTML != "" {
-			xhtmlBody += "<hr/><h2>Comments</h2>" + commentsHTML
-		}
-
-	case len(req.URLs) > 0:
-		xhtmlBody = a.buildEpubMultiArticleBody(req.URLs, req.Title)
-
-	default:
+	if req.URL == "" && len(req.URLs) == 0 {
 		jsonError(w, "url or urls field required", http.StatusBadRequest)
 		return
 	}
 
-	embedImages := req.EmbedImages == nil || *req.EmbedImages
-	data, err := generateEpub(req.Title, req.Author, xhtmlBody, embedImages)
+	er := exportRequest{
+		url:         req.URL,
+		urls:        req.URLs,
+		commentsURL: req.CommentsURL,
+		title:       req.Title,
+		author:      req.Author,
+		embedImages: req.EmbedImages == nil || *req.EmbedImages,
+	}
+	rd := epubRenderer{}
+	data, title, err := rd.render(a, er)
 	if err != nil {
-		jsonError(w, err.Error(), http.StatusInternalServerError)
+		jsonError(w, err.Error(), http.StatusBadGateway)
 		return
 	}
 
-	var filename string
-	if len(req.URLs) > 0 {
-		filename = sanitizeFilename(req.Title) + "_" + time.Now().Format("2006-01-02") + ".epub"
-	} else {
-		filename = sanitizeFilename(req.Title) + ".epub"
-	}
-	w.Header().Set("Content-Type", "application/epub+zip")
-	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
+	w.Header().Set("Content-Type", rd.mime())
+	w.Header().Set("Content-Disposition", `attachment; filename="`+exportFilename(title, rd.ext(), er.bulk())+`"`)
 	w.Write(data)
-}
-
-func (a *App) buildEpubMultiArticleBody(urls []string, feedTitle string) string {
-	// Reuse the same concurrent fetch logic as MOBI
-	type result struct {
-		index   int
-		title   string
-		meta    string
-		content string
-		err     error
-	}
-
-	results := make([]result, len(urls))
-	sem := make(chan struct{}, 5)
-	done := make(chan struct{})
-
-	resultCh := make(chan result, len(urls))
-
-	for i, u := range urls {
-		go func(idx int, url string) {
-			sem <- struct{}{}
-			defer func() { <-sem }()
-			article, err := a.fetchReadable(url)
-			if err != nil {
-				resultCh <- result{index: idx, err: err}
-			} else {
-				resultCh <- result{index: idx, title: article.Title, meta: articleMetaHTML(article), content: `<p><a href="` + html.EscapeString(url) + `">` + html.EscapeString(url) + `</a></p>` + article.Content}
-			}
-		}(i, u)
-	}
-
-	go func() {
-		for i := 0; i < len(urls); i++ {
-			r := <-resultCh
-			results[r.index] = r
-		}
-		close(done)
-	}()
-	<-done
-
-	var sb strings.Builder
-	sb.WriteString("<h1>" + html.EscapeString(feedTitle) + "</h1>")
-
-	// Table of contents
-	sb.WriteString("<h2>Contents</h2><ol>")
-	for i, r := range results {
-		if r.err != nil {
-			sb.WriteString(fmt.Sprintf(`<li><a href="#article-%d">[Failed to fetch article]</a></li>`, i))
-		} else {
-			sb.WriteString(fmt.Sprintf(`<li><a href="#article-%d">%s</a></li>`, i, html.EscapeString(r.title)))
-		}
-	}
-	sb.WriteString("</ol><hr/>")
-
-	for i, r := range results {
-		if r.err != nil {
-			sb.WriteString(fmt.Sprintf(`<h2 id="article-%d">[Failed to fetch article]</h2><hr/>`, i))
-		} else {
-			sb.WriteString(fmt.Sprintf(`<h2 id="article-%d">%s</h2>`, i, html.EscapeString(r.title)))
-			sb.WriteString(r.meta)
-			sb.WriteString(r.content)
-			sb.WriteString("<hr/>")
-		}
-	}
-	return sb.String()
 }
 
 var (

@@ -9,8 +9,6 @@ import (
 	"net/http"
 	"os"
 	"time"
-
-	"github.com/adhamsalama/inkfeed-backend/mobi"
 )
 
 // External provider endpoints. Declared as package vars so tests can point them
@@ -280,128 +278,40 @@ func (a *App) emailHandler(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "url or urls and to fields required", http.StatusBadRequest)
 		return
 	}
-	if req.Format == "" {
-		req.Format = "epub"
+	// The same Renderer that powers the /mobi and /epub download endpoints
+	// produces the attachment here — no per-format or single/bulk branching.
+	er := exportRequest{
+		url:         req.URL,
+		urls:        req.URLs,
+		commentsURL: req.CommentsURL,
+		author:      req.Author,
+		embedImages: req.EmbedImages == nil || *req.EmbedImages,
+	}
+	subject := "Your exported article is ready"
+	if er.bulk() {
+		er.title = firstNonEmpty(req.Author, "Articles")
+		subject = "Your exported articles are ready"
 	}
 
-	// Bulk email
-	if len(req.URLs) > 0 {
-		title := req.Author
-		if title == "" {
-			title = "Articles"
-		}
-		var msg EmailMessage
-		msg.To = req.To
-		msg.Subject = "Your exported articles are ready"
-		switch req.Format {
-		case "mobi":
-			htmlContent := a.fetchAndCombine(req.URLs, title)
-			embedImagesMobi := req.EmbedImages == nil || *req.EmbedImages
-			var mobiImgRecords [][]byte
-			if embedImagesMobi {
-				htmlContent, mobiImgRecords = downloadAndEmbedMobiImages(htmlContent)
-			}
-			data, err := mobi.Write(mobi.Book{Title: title, Author: req.Author, Content: htmlContent}, mobiImgRecords)
-			if err != nil {
-				jsonError(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			msg.HTMLContent = "<p>" + html.EscapeString(title) + "</p>"
-			msg.Attachments = []EmailAttachment{{
-				Filename: sanitizeFilename(title) + "_" + time.Now().Format("2006-01-02") + ".mobi",
-				Content:  data,
-				MimeType: "application/x-mobipocket-ebook",
-			}}
-		default: // epub
-			xhtmlBody := a.buildEpubMultiArticleBody(req.URLs, title)
-			data, err := generateEpub(title, req.Author, xhtmlBody, req.EmbedImages == nil || *req.EmbedImages)
-			if err != nil {
-				jsonError(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			msg.HTMLContent = "<p>" + html.EscapeString(title) + "</p>"
-			msg.Attachments = []EmailAttachment{{
-				Filename: sanitizeFilename(title) + "_" + time.Now().Format("2006-01-02") + ".epub",
-				Content:  data,
-				MimeType: "application/epub+zip",
-			}}
-		}
-		sender := newEmailSender()
-		if err := sender.Send(msg); err != nil {
-			jsonError(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]bool{"success": true})
-		return
-	}
-
-	article, err := a.fetchReadable(req.URL)
+	rd := rendererForFormat(req.Format)
+	data, title, err := rd.render(a, er)
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusBadGateway)
 		return
 	}
 
-	title := article.Title
-	if title == "" {
-		title = "Article"
-	}
-
-	links := `<p><a href="` + html.EscapeString(req.URL) + `">` + html.EscapeString(req.URL) + `</a></p>`
-	if req.CommentsURL != "" {
-		links += `<p><a href="` + html.EscapeString(req.CommentsURL) + `">Comments</a></p>`
-	}
-	commentsHTML := a.fetchCommentsHTML(req.CommentsURL)
-	meta := articleMetaHTML(article)
-	articleHTML := "<html><body><h1>" + html.EscapeString(title) + "</h1>" + links + meta + article.Content
-	if commentsHTML != "" {
-		articleHTML += "<hr/><h2>Comments</h2>" + commentsHTML
-	}
-	articleHTML += "</body></html>"
-
-	var msg EmailMessage
-	msg.To = req.To
-	msg.Subject = "Your exported article is ready"
-
-	switch req.Format {
-	case "mobi":
-		embedImagesMobi := req.EmbedImages == nil || *req.EmbedImages
-		var mobiImgRecords [][]byte
-		if embedImagesMobi {
-			articleHTML, mobiImgRecords = downloadAndEmbedMobiImages(articleHTML)
-		}
-		data, err := mobi.Write(mobi.Book{Title: title, Author: req.Author, Content: articleHTML}, mobiImgRecords)
-		if err != nil {
-			jsonError(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		msg.HTMLContent = "<p>" + html.EscapeString(title) + "</p>"
-		msg.Attachments = []EmailAttachment{{
-			Filename: sanitizeFilename(title) + ".mobi",
+	msg := EmailMessage{
+		To:          req.To,
+		Subject:     subject,
+		HTMLContent: "<p>" + html.EscapeString(title) + "</p>",
+		Attachments: []EmailAttachment{{
+			Filename: exportFilename(title, rd.ext(), er.bulk()),
 			Content:  data,
-			MimeType: "application/x-mobipocket-ebook",
-		}}
-	default: // "epub"
-		embedImages := req.EmbedImages == nil || *req.EmbedImages
-		xhtmlBody := "<h1>" + html.EscapeString(title) + "</h1>" + links + meta + article.Content
-		if commentsHTML != "" {
-			xhtmlBody += "<hr/><h2>Comments</h2>" + commentsHTML
-		}
-		data, err := generateEpub(title, req.Author, xhtmlBody, embedImages)
-		if err != nil {
-			jsonError(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		msg.HTMLContent = "<p>" + html.EscapeString(title) + "</p>"
-		msg.Attachments = []EmailAttachment{{
-			Filename: sanitizeFilename(title) + ".epub",
-			Content:  data,
-			MimeType: "application/epub+zip",
-		}}
+			MimeType: rd.mime(),
+		}},
 	}
 
-	sender := newEmailSender()
-	if err := sender.Send(msg); err != nil {
+	if err := newEmailSender().Send(msg); err != nil {
 		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

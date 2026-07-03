@@ -16,8 +16,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
-	"time"
 
 	"github.com/adhamsalama/inkfeed-backend/mobi"
 	"github.com/srwiley/oksvg"
@@ -392,158 +390,29 @@ func (a *App) mobiHandler(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-
-	var htmlContent string
-
-	switch {
-	case req.URL != "":
-		article, err := a.fetchReadable(req.URL)
-		if err != nil {
-			jsonError(w, err.Error(), http.StatusBadGateway)
-			return
-		}
-		if req.Title == "" {
-			req.Title = article.Title
-		}
-		commentsHTML := a.fetchCommentsHTML(req.CommentsURL)
-		link := `<p><a href="` + html.EscapeString(req.URL) + `">` + html.EscapeString(req.URL) + `</a></p>`
-
-		// Build a table of contents from the article's section headings (plus a
-		// Comments entry when present). Only worthwhile when there are at least
-		// two navigation points; otherwise fall back to a plain document.
-		annotated, labels := annotateArticleHeadings(article.Content, 0)
-		hasComments := commentsHTML != ""
-		total := len(labels)
-		if hasComments {
-			total++
-		}
-
-		var sb strings.Builder
-		sb.WriteString("<html><body><h1>" + html.EscapeString(req.Title) + "</h1>" + link + articleMetaHTML(article))
-		if total >= 2 {
-			sb.WriteString("<h2>Contents</h2><ul>")
-			for _, l := range labels {
-				sb.WriteString(fmt.Sprintf(`<li><a filepos="%s">%s</a></li>`, mobiTOCPlaceholder, html.EscapeString(l)))
-			}
-			if hasComments {
-				sb.WriteString(fmt.Sprintf(`<li><a filepos="%s">Comments</a></li>`, mobiTOCPlaceholder))
-			}
-			sb.WriteString("</ul><mbp:pagebreak/><hr/>")
-			sb.WriteString(annotated)
-			if hasComments {
-				sb.WriteString(fmt.Sprintf(`<hr/><a name="inkfeed-toc-%d"></a><h2>Comments</h2>`, len(labels)) + commentsHTML)
-			}
-		} else {
-			sb.WriteString(article.Content)
-			if hasComments {
-				sb.WriteString("<hr/><h2>Comments</h2>" + commentsHTML)
-			}
-		}
-		sb.WriteString("</body></html>")
-		htmlContent = sb.String()
-
-	case len(req.URLs) > 0:
-		htmlContent = a.fetchAndCombine(req.URLs, req.Title)
-
-	default:
+	if req.URL == "" && len(req.URLs) == 0 {
 		jsonError(w, "url or urls field required", http.StatusBadRequest)
 		return
 	}
 
-	embedImages := req.EmbedImages == nil || *req.EmbedImages
-	var imageRecords [][]byte
-	if embedImages {
-		htmlContent, imageRecords = downloadAndEmbedMobiImages(htmlContent)
+	er := exportRequest{
+		url:         req.URL,
+		urls:        req.URLs,
+		commentsURL: req.CommentsURL,
+		title:       req.Title,
+		author:      req.Author,
+		embedImages: req.EmbedImages == nil || *req.EmbedImages,
 	}
-
-	// Resolve the table-of-contents filepos links to their byte offsets. This
-	// must run last, after image embedding has shifted the final byte layout.
-	htmlContent = patchMobiTOCFilepos(htmlContent)
-
-	data, err := mobi.Write(mobi.Book{
-		Title:   req.Title,
-		Author:  req.Author,
-		Content: htmlContent,
-		TOC:     buildMobiTOC(htmlContent),
-	}, imageRecords)
+	rd := mobiRenderer{}
+	data, title, err := rd.render(a, er)
 	if err != nil {
-		jsonError(w, err.Error(), http.StatusInternalServerError)
+		jsonError(w, err.Error(), http.StatusBadGateway)
 		return
 	}
 
-	var filename string
-	if len(req.URLs) > 0 {
-		filename = sanitizeFilename(req.Title) + "_" + time.Now().Format("2006-01-02") + ".mobi"
-	} else {
-		filename = sanitizeFilename(req.Title) + ".mobi"
-	}
-	w.Header().Set("Content-Type", "application/x-mobipocket-ebook")
-	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
+	w.Header().Set("Content-Type", rd.mime())
+	w.Header().Set("Content-Disposition", `attachment; filename="`+exportFilename(title, rd.ext(), er.bulk())+`"`)
 	w.Write(data)
-}
-
-// fetchAndCombine fetches all URLs concurrently (max 5 at a time) and
-// returns a single HTML document combining all article contents.
-func (a *App) fetchAndCombine(urls []string, feedTitle string) string {
-	type result struct {
-		index   int
-		title   string
-		meta    string
-		content string
-		err     error
-	}
-
-	results := make([]result, len(urls))
-	sem := make(chan struct{}, 5)
-	var wg sync.WaitGroup
-
-	for i, u := range urls {
-		wg.Add(1)
-		go func(idx int, url string) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-			article, err := a.fetchReadable(url)
-			if err != nil {
-				results[idx] = result{index: idx, err: err}
-				return
-			}
-			results[idx] = result{index: idx, title: article.Title, meta: articleMetaHTML(article), content: `<p><a href="` + html.EscapeString(url) + `">` + html.EscapeString(url) + `</a></p>` + article.Content}
-		}(i, u)
-	}
-	wg.Wait()
-
-	var sb strings.Builder
-	sb.WriteString("<html><body>")
-	sb.WriteString("<h1>" + html.EscapeString(feedTitle) + "</h1>")
-
-	// Table of contents: one filepos link per article. The filepos values are
-	// placeholders here and are rewritten to real byte offsets by
-	// patchMobiTOCFilepos once the final HTML layout is known. Each link points
-	// at the matching <a name="inkfeed-toc-N"> anchor emitted before its article.
-	sb.WriteString("<h2>Contents</h2><ul>")
-	for _, r := range results {
-		title := r.title
-		if r.err != nil || title == "" {
-			title = "[Failed to fetch article]"
-		}
-		sb.WriteString(fmt.Sprintf(`<li><a filepos="%s">%s</a></li>`, mobiTOCPlaceholder, html.EscapeString(title)))
-	}
-	sb.WriteString("</ul><mbp:pagebreak/><hr/>")
-
-	for i, r := range results {
-		sb.WriteString(fmt.Sprintf(`<a name="inkfeed-toc-%d"></a>`, i))
-		if r.err != nil {
-			sb.WriteString("<h2>[Failed to fetch article]</h2><hr/>")
-		} else {
-			sb.WriteString("<h2>" + html.EscapeString(r.title) + "</h2>")
-			sb.WriteString(r.meta)
-			sb.WriteString(r.content)
-			sb.WriteString("<hr/>")
-		}
-	}
-	sb.WriteString("</body></html>")
-	return sb.String()
 }
 
 // mobiTOCPlaceholder is a fixed-width (10-digit) filepos value emitted by
