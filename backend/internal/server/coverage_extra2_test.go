@@ -90,10 +90,7 @@ func TestEmailAndEpubSingleWithComments(t *testing.T) {
 	}
 
 	// email single with comments (epub and mobi)
-	orig := brevoAPIURL
-	defer func() { brevoAPIURL = orig }()
-	emailSrv := newTestServer(t, func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusCreated) })
-	brevoAPIURL = emailSrv.URL
+	useFakeSender(t)
 
 	w = httptest.NewRecorder()
 	app.emailHandler(w, postJSON("/email", `{"url":"https://example.com/art","to":"k@k.com","commentsUrl":"https://news.ycombinator.com/item?id=1","embedImages":false}`))

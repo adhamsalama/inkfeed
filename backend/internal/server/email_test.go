@@ -1,147 +1,36 @@
 package server
 
 import (
-	"encoding/json"
-	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"strings"
 	"testing"
+
+	"github.com/adhamsalama/inkfeed-backend/internal/email"
 )
 
-func TestNewEmailSender(t *testing.T) {
-	os.Setenv("EMAIL_PROVIDER", "mailersend")
-	if _, ok := newEmailSender().(*MailerSendSender); !ok {
-		t.Error("expected MailerSendSender")
-	}
-	os.Setenv("EMAIL_PROVIDER", "resend")
-	if _, ok := newEmailSender().(*ResendSender); !ok {
-		t.Error("expected ResendSender")
-	}
-	os.Setenv("EMAIL_PROVIDER", "brevo")
-	if _, ok := newEmailSender().(*BrevoSender); !ok {
-		t.Error("expected BrevoSender")
-	}
-	os.Unsetenv("EMAIL_PROVIDER")
-	if _, ok := newEmailSender().(*BrevoSender); !ok {
-		t.Error("default should be BrevoSender")
-	}
+// fakeSender records the last message and returns a configurable error, letting
+// handler tests avoid any real provider round-trip.
+type fakeSender struct {
+	err  error
+	last email.Message
 }
 
-func emailMsg() EmailMessage {
-	return EmailMessage{
-		To:          "reader@kindle.com",
-		Subject:     "Test",
-		HTMLContent: "<p>hi</p>",
-		Attachments: []EmailAttachment{{Filename: "a.epub", Content: []byte("data"), MimeType: "application/epub+zip"}},
-	}
+func (f *fakeSender) Send(m email.Message) error {
+	f.last = m
+	return f.err
 }
 
-func TestBrevoSenderSuccess(t *testing.T) {
-	var gotBody map[string]any
-	srv := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer KEY" {
-			t.Errorf("auth header = %q", r.Header.Get("Authorization"))
-		}
-		b, _ := io.ReadAll(r.Body)
-		json.Unmarshal(b, &gotBody)
-		w.WriteHeader(http.StatusCreated)
-	})
-	orig := brevoAPIURL
-	brevoAPIURL = srv.URL
-	defer func() { brevoAPIURL = orig }()
-
-	s := &BrevoSender{APIKey: "KEY", FromEmail: "from@x.com", FromName: "From"}
-	if err := s.Send(emailMsg()); err != nil {
-		t.Fatal(err)
-	}
-	if gotBody["subject"] != "Test" {
-		t.Errorf("subject not sent: %+v", gotBody)
-	}
-}
-
-func TestBrevoSenderError(t *testing.T) {
-	srv := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(`{"message":"bad"}`))
-	})
-	orig := brevoAPIURL
-	brevoAPIURL = srv.URL
-	defer func() { brevoAPIURL = orig }()
-
-	s := &BrevoSender{APIKey: "K"}
-	if err := s.Send(emailMsg()); err == nil {
-		t.Error("expected API error")
-	}
-}
-
-func TestMailerSendSender(t *testing.T) {
-	srv := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusAccepted)
-	})
-	orig := mailerSendAPIURL
-	mailerSendAPIURL = srv.URL
-	defer func() { mailerSendAPIURL = orig }()
-	s := &MailerSendSender{APIKey: "K", FromEmail: "f@x.com", FromName: "F"}
-	if err := s.Send(emailMsg()); err != nil {
-		t.Fatal(err)
-	}
-
-	// error status
-	srv2 := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusUnprocessableEntity)
-	})
-	mailerSendAPIURL = srv2.URL
-	if err := s.Send(emailMsg()); err == nil {
-		t.Error("expected error")
-	}
-}
-
-func TestResendSender(t *testing.T) {
-	var body map[string]any
-	srv := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		b, _ := io.ReadAll(r.Body)
-		json.Unmarshal(b, &body)
-		w.WriteHeader(http.StatusOK)
-	})
-	orig := resendAPIURL
-	resendAPIURL = srv.URL
-	defer func() { resendAPIURL = orig }()
-
-	s := &ResendSender{APIKey: "K", FromEmail: "f@x.com", FromName: "F"}
-	if err := s.Send(emailMsg()); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(body["from"].(string), "F <f@x.com>") {
-		t.Errorf("from format = %v", body["from"])
-	}
-
-	// error
-	srv2 := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusForbidden)
-	})
-	resendAPIURL = srv2.URL
-	if err := s.Send(emailMsg()); err == nil {
-		t.Error("expected error")
-	}
-}
-
-// emailTestServer sets up a fake email provider and the article proxy.
-func setupEmailEnv(t *testing.T) {
-	os.Setenv("EMAIL_PROVIDER", "brevo")
-	t.Cleanup(func() { os.Unsetenv("EMAIL_PROVIDER") })
-	srv := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusCreated)
-	})
-	brevoAPIURL = srv.URL
-	serveArticleViaProxy(t, articleHTML)
+// useFakeSender swaps app.sender for a fake for the duration of the test.
+func useFakeSender(t *testing.T) *fakeSender {
+	t.Helper()
+	f := &fakeSender{}
+	prev := app.sender
+	app.sender = f
+	t.Cleanup(func() { app.sender = prev })
+	return f
 }
 
 func TestEmailHandler(t *testing.T) {
-	orig := brevoAPIURL
-	defer func() { brevoAPIURL = orig }()
-
 	// wrong method
 	w := httptest.NewRecorder()
 	app.emailHandler(w, httptest.NewRequest(http.MethodGet, "/email", nil))
@@ -161,40 +50,37 @@ func TestEmailHandler(t *testing.T) {
 		t.Errorf("missing to = %d", w.Code)
 	}
 
-	setupEmailEnv(t)
+	useFakeSender(t)
+	serveArticleViaProxy(t, articleHTML)
 
-	// single article, epub (default format)
-	w = httptest.NewRecorder()
-	app.emailHandler(w, postJSON("/email", `{"url":"https://example.com/e1","to":"k@kindle.com","embedImages":false}`))
-	if w.Code != http.StatusOK {
-		t.Fatalf("single epub email = %d body=%s", w.Code, w.Body.String())
+	cases := []string{
+		`{"url":"https://example.com/e1","to":"k@kindle.com","embedImages":false}`,
+		`{"url":"https://example.com/e2","to":"k@kindle.com","format":"mobi","embedImages":false}`,
+		`{"urls":["https://example.com/a","https://example.com/b"],"to":"k@kindle.com","author":"Bundle","embedImages":false}`,
+		`{"urls":["https://example.com/a","https://example.com/b"],"to":"k@kindle.com","format":"mobi","embedImages":false}`,
 	}
-
-	// single article, mobi
-	w = httptest.NewRecorder()
-	app.emailHandler(w, postJSON("/email", `{"url":"https://example.com/e2","to":"k@kindle.com","format":"mobi","embedImages":false}`))
-	if w.Code != http.StatusOK {
-		t.Errorf("single mobi email = %d", w.Code)
+	for _, body := range cases {
+		w = httptest.NewRecorder()
+		app.emailHandler(w, postJSON("/email", body))
+		if w.Code != http.StatusOK {
+			t.Fatalf("email %s = %d body=%s", body, w.Code, w.Body.String())
+		}
 	}
+}
 
-	// bulk epub
-	w = httptest.NewRecorder()
-	app.emailHandler(w, postJSON("/email", `{"urls":["https://example.com/a","https://example.com/b"],"to":"k@kindle.com","author":"Bundle","embedImages":false}`))
-	if w.Code != http.StatusOK {
-		t.Errorf("bulk epub email = %d", w.Code)
-	}
-
-	// bulk mobi
-	w = httptest.NewRecorder()
-	app.emailHandler(w, postJSON("/email", `{"urls":["https://example.com/a","https://example.com/b"],"to":"k@kindle.com","format":"mobi","embedImages":false}`))
-	if w.Code != http.StatusOK {
-		t.Errorf("bulk mobi email = %d", w.Code)
+func TestEmailHandlerSendError(t *testing.T) {
+	f := useFakeSender(t)
+	f.err = http.ErrHandlerTimeout // any non-nil error
+	serveArticleViaProxy(t, articleHTML)
+	w := httptest.NewRecorder()
+	app.emailHandler(w, postJSON("/email", `{"url":"https://example.com/e","to":"k@kindle.com","embedImages":false}`))
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("send error = %d, want 500", w.Code)
 	}
 }
 
 func TestEmailHandlerFetchError(t *testing.T) {
-	os.Setenv("EMAIL_PROVIDER", "brevo")
-	defer os.Unsetenv("EMAIL_PROVIDER")
+	useFakeSender(t)
 	setProxyURL(t, "http://127.0.0.1:0/dead")
 	w := httptest.NewRecorder()
 	app.emailHandler(w, postJSON("/email", `{"url":"http://127.0.0.1:0/dead","to":"k@kindle.com"}`))

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/adhamsalama/inkfeed-backend/db"
+	"github.com/adhamsalama/inkfeed-backend/internal/email"
 )
 
 // userAgent is sent on every outbound scraping/image request.
@@ -24,8 +25,9 @@ const defaultProxyURL = "https://throbbing-morning-e187.adhamsalama.workers.dev"
 // globals — this makes the components independently testable and would let the
 // package be split into sub-packages later.
 type App struct {
-	q     *db.Queries
-	cache *responseCache
+	q      *db.Queries
+	cache  *responseCache
+	sender email.Sender
 
 	allowedOrigins []string
 	proxyURL       string
@@ -51,6 +53,7 @@ func newApp(q *db.Queries) *App {
 	a := &App{
 		q:              q,
 		cache:          &responseCache{entries: make(map[string]cacheEntry)},
+		sender:         email.NewSender(),
 		allowedOrigins: append([]string(nil), defaultAllowedOrigins...),
 		proxyURL:       defaultProxyURL,
 		rlHits:         make(map[string][]time.Time),
