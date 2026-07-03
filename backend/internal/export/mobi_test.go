@@ -1,4 +1,4 @@
-package server
+package export
 
 import (
 	"bytes"
@@ -7,7 +7,6 @@ import (
 	"image/color"
 	"image/png"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -241,54 +240,36 @@ func TestPatchMobiTOCFilepos(t *testing.T) {
 	_ = in
 }
 
-func TestMobiHandler(t *testing.T) {
-	// wrong method
-	w := httptest.NewRecorder()
-	app.mobiHandler(w, httptest.NewRequest(http.MethodGet, "/mobi", nil))
-	if w.Code != http.StatusMethodNotAllowed {
-		t.Errorf("GET = %d", w.Code)
+func TestMobiRenderer(t *testing.T) {
+	rd := mobiRenderer{}
+	if rd.Ext() != "mobi" || rd.Mime() == "" {
+		t.Errorf("ext/mime wrong")
 	}
-
-	// bad body
-	w = httptest.NewRecorder()
-	app.mobiHandler(w, postJSON("/mobi", `{bad`))
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("bad body = %d", w.Code)
+	data, title, err := rd.Render(fakeFetcher{}, Request{URL: "https://example.com/m1", Title: "My MOBI"})
+	if err != nil || len(data) == 0 || title != "My MOBI" {
+		t.Fatalf("single mobi: %v title=%q len=%d", err, title, len(data))
 	}
-
-	// neither url nor urls
-	w = httptest.NewRecorder()
-	app.mobiHandler(w, postJSON("/mobi", `{}`))
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("no url = %d", w.Code)
+	data, _, err = rd.Render(fakeFetcher{}, Request{URLs: []string{"https://a", "https://b"}, Title: "Bundle", EmbedImages: false})
+	if err != nil || len(data) == 0 {
+		t.Errorf("bulk mobi: %v", err)
 	}
-
-	// single url
-	serveArticleViaProxy(t, articleHTML)
-	w = httptest.NewRecorder()
-	app.mobiHandler(w, postJSON("/mobi", `{"url":"https://example.com/m1","title":"My MOBI","embedImages":false}`))
-	if w.Code != http.StatusOK {
-		t.Fatalf("single mobi = %d body=%s", w.Code, w.Body.String())
-	}
-	if !strings.Contains(w.Header().Get("Content-Disposition"), ".mobi") {
-		t.Errorf("no mobi filename")
-	}
-
-	// multiple urls
-	w = httptest.NewRecorder()
-	app.mobiHandler(w, postJSON("/mobi", `{"urls":["https://example.com/a","https://example.com/b"],"title":"Bundle","embedImages":false}`))
-	if w.Code != http.StatusOK {
-		t.Errorf("multi mobi = %d", w.Code)
+	if _, _, err := rd.Render(fakeFetcher{fail: map[string]bool{"https://x": true}}, Request{URL: "https://x"}); err == nil {
+		t.Error("expected fetch error")
 	}
 }
 
 func TestFetchAndCombine(t *testing.T) {
-	serveArticleViaProxy(t, articleHTML)
-	out := app.fetchAndCombine([]string{"https://example.com/1", "https://example.com/2"}, "Feed Title")
+	out := fetchAndCombine(fakeFetcher{}, []string{"https://example.com/1", "https://example.com/2"}, "Feed Title")
 	if !strings.Contains(out, "Feed Title") || !strings.Contains(out, "Contents") {
 		t.Errorf("combined output missing header/toc")
 	}
 	if strings.Count(out, "inkfeed-toc-") < 2 {
 		t.Errorf("expected per-article anchors")
+	}
+
+	// a failing URL yields the failure marker
+	out = fetchAndCombine(fakeFetcher{fail: map[string]bool{"https://bad": true}}, []string{"https://good", "https://bad"}, "Mix")
+	if !strings.Contains(out, "Failed to fetch article") {
+		t.Errorf("expected failure marker")
 	}
 }

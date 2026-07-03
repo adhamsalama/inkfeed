@@ -1,4 +1,4 @@
-package server
+package export
 
 import (
 	"archive/zip"
@@ -6,7 +6,6 @@ import (
 	"image"
 	"image/jpeg"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -144,50 +143,49 @@ func TestGenerateEpub(t *testing.T) {
 }
 
 func TestBuildEpubMultiArticleBody(t *testing.T) {
-	serveArticleViaProxy(t, articleHTML)
-	body := app.buildEpubMultiArticleBody([]string{"https://example.com/1", "https://example.com/2"}, "Feed")
+	body := buildEpubMultiArticleBody(fakeFetcher{}, []string{"https://example.com/1", "https://example.com/2"}, "Feed")
 	if !strings.Contains(body, "Feed") || !strings.Contains(body, "Contents") {
 		t.Errorf("multi body missing header/toc")
 	}
 	if !strings.Contains(body, `id="article-0"`) {
 		t.Errorf("article anchors missing")
 	}
+	// failing URL -> marker
+	body = buildEpubMultiArticleBody(fakeFetcher{fail: map[string]bool{"https://bad": true}}, []string{"https://good", "https://bad"}, "Mix")
+	if !strings.Contains(body, "Failed to fetch article") {
+		t.Errorf("expected failure marker")
+	}
 }
 
-func TestEpubHandler(t *testing.T) {
-	// wrong method
-	w := httptest.NewRecorder()
-	app.epubHandler(w, httptest.NewRequest(http.MethodGet, "/epub", nil))
-	if w.Code != http.StatusMethodNotAllowed {
-		t.Errorf("GET = %d", w.Code)
+func TestEpubRenderer(t *testing.T) {
+	rd := epubRenderer{}
+	if rd.Ext() != "epub" || rd.Mime() == "" {
+		t.Errorf("ext/mime wrong")
 	}
-	// bad body
-	w = httptest.NewRecorder()
-	app.epubHandler(w, postJSON("/epub", `{bad`))
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("bad body = %d", w.Code)
+	data, title, err := rd.Render(fakeFetcher{}, Request{URL: "https://example.com/e1", Title: "E"})
+	if err != nil || len(data) == 0 || title != "E" {
+		t.Fatalf("single epub: %v title=%q", err, title)
 	}
-	// no url
-	w = httptest.NewRecorder()
-	app.epubHandler(w, postJSON("/epub", `{}`))
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("no url = %d", w.Code)
+	data, _, err = rd.Render(fakeFetcher{comments: "<p>c</p>"}, Request{URLs: []string{"https://a", "https://b"}, Title: "Bundle"})
+	if err != nil || len(data) == 0 {
+		t.Errorf("bulk epub: %v", err)
 	}
+	if _, _, err := rd.Render(fakeFetcher{fail: map[string]bool{"https://x": true}}, Request{URL: "https://x"}); err == nil {
+		t.Error("expected fetch error")
+	}
+}
 
-	serveArticleViaProxy(t, articleHTML)
-	// single
-	w = httptest.NewRecorder()
-	app.epubHandler(w, postJSON("/epub", `{"url":"https://example.com/e1","title":"E","embedImages":false}`))
-	if w.Code != http.StatusOK {
-		t.Fatalf("single epub = %d body=%s", w.Code, w.Body.String())
+func TestRendererForAndFilename(t *testing.T) {
+	if _, ok := RendererFor("mobi").(mobiRenderer); !ok {
+		t.Error("expected mobiRenderer")
 	}
-	if !strings.Contains(w.Header().Get("Content-Disposition"), ".epub") {
-		t.Errorf("no epub filename")
+	if _, ok := RendererFor("epub").(epubRenderer); !ok {
+		t.Error("expected epubRenderer (default)")
 	}
-	// multi
-	w = httptest.NewRecorder()
-	app.epubHandler(w, postJSON("/epub", `{"urls":["https://example.com/a","https://example.com/b"],"title":"Bundle","embedImages":false}`))
-	if w.Code != http.StatusOK {
-		t.Errorf("multi epub = %d", w.Code)
+	if Filename("My Title", "epub", false) != "My Title.epub" {
+		t.Errorf("single filename = %q", Filename("My Title", "epub", false))
+	}
+	if !strings.HasSuffix(Filename("T", "mobi", true), ".mobi") || !strings.Contains(Filename("T", "mobi", true), "_") {
+		t.Errorf("bulk filename = %q", Filename("T", "mobi", true))
 	}
 }

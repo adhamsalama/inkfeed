@@ -1,8 +1,7 @@
-package server
+package export
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"image"
 	"image/jpeg"
@@ -21,52 +20,6 @@ import (
 	"github.com/adhamsalama/inkfeed-backend/internal/content"
 	epub "github.com/go-shiori/go-epub"
 )
-
-type EpubRequest struct {
-	URL         string   `json:"url"`
-	URLs        []string `json:"urls"`
-	Title       string   `json:"title"`
-	Author      string   `json:"author"`
-	CommentsURL string   `json:"commentsUrl"`
-	EmbedImages *bool    `json:"embedImages"`
-}
-
-func (a *App) epubHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		jsonError(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var req EpubRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		jsonError(w, "invalid request body", http.StatusBadRequest)
-		return
-	}
-
-	if req.URL == "" && len(req.URLs) == 0 {
-		jsonError(w, "url or urls field required", http.StatusBadRequest)
-		return
-	}
-
-	er := exportRequest{
-		url:         req.URL,
-		urls:        req.URLs,
-		commentsURL: req.CommentsURL,
-		title:       req.Title,
-		author:      req.Author,
-		embedImages: req.EmbedImages == nil || *req.EmbedImages,
-	}
-	rd := epubRenderer{}
-	data, title, err := rd.render(a, er)
-	if err != nil {
-		jsonError(w, err.Error(), http.StatusBadGateway)
-		return
-	}
-
-	w.Header().Set("Content-Type", rd.mime())
-	w.Header().Set("Content-Disposition", `attachment; filename="`+exportFilename(title, rd.ext(), er.bulk())+`"`)
-	w.Write(data)
-}
 
 var (
 	imgSrcRe   = regexp.MustCompile(`(?i)<img\s[^>]*\bsrc="(https?://[^"]+)"[^>]*>`)

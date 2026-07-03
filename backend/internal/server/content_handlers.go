@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/adhamsalama/inkfeed-backend/internal/content"
+	"github.com/adhamsalama/inkfeed-backend/internal/export"
 )
 
 // These handlers are thin HTTP adapters over the content.Service capability:
@@ -38,7 +39,7 @@ func (a *App) textHandler(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, err.Error(), http.StatusBadGateway)
 		return
 	}
-	filename := sanitizeFilename(article.Title) + ".txt"
+	filename := export.Filename(article.Title, "txt", false)
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
 	w.Write([]byte(article.TextContent))

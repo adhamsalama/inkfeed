@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/adhamsalama/inkfeed-backend/internal/email"
+	"github.com/adhamsalama/inkfeed-backend/internal/export"
 )
 
 // EmailRequest is the request body for POST /email.
@@ -38,21 +39,25 @@ func (a *App) emailHandler(w http.ResponseWriter, r *http.Request) {
 
 	// The same Renderer that powers the /mobi and /epub download endpoints
 	// produces the attachment here — no per-format or single/bulk branching.
-	er := exportRequest{
-		url:         req.URL,
-		urls:        req.URLs,
-		commentsURL: req.CommentsURL,
-		author:      req.Author,
-		embedImages: req.EmbedImages == nil || *req.EmbedImages,
+	bulk := len(req.URLs) > 0
+	er := export.Request{
+		URL:         req.URL,
+		URLs:        req.URLs,
+		CommentsURL: req.CommentsURL,
+		Author:      req.Author,
+		EmbedImages: req.EmbedImages == nil || *req.EmbedImages,
 	}
 	subject := "Your exported article is ready"
-	if er.bulk() {
-		er.title = firstNonEmpty(req.Author, "Articles")
+	if bulk {
+		er.Title = req.Author
+		if er.Title == "" {
+			er.Title = "Articles"
+		}
 		subject = "Your exported articles are ready"
 	}
 
-	rd := rendererForFormat(req.Format)
-	data, title, err := rd.render(a, er)
+	rd := export.RendererFor(req.Format)
+	data, title, err := rd.Render(a.content, er)
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusBadGateway)
 		return
@@ -63,9 +68,9 @@ func (a *App) emailHandler(w http.ResponseWriter, r *http.Request) {
 		Subject:     subject,
 		HTMLContent: "<p>" + html.EscapeString(title) + "</p>",
 		Attachments: []email.Attachment{{
-			Filename: exportFilename(title, rd.ext(), er.bulk()),
+			Filename: export.FilenameForRequest(er, title, rd.Ext()),
 			Content:  data,
-			MimeType: rd.mime(),
+			MimeType: rd.Mime(),
 		}},
 	}
 

@@ -37,30 +37,6 @@ func TestGetPreferencesFullyPopulated(t *testing.T) {
 	}
 }
 
-func TestMultiArticleWithFailingURL(t *testing.T) {
-	// Proxy serves a good article for /good and 500 for anything else, so the
-	// second URL fails and exercises the error branches.
-	srv := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		if strings.Contains(r.URL.RawQuery, "good") || strings.Contains(r.URL.Path, "good") {
-			w.Header().Set("Content-Type", "text/html")
-			w.Write([]byte(articleHTML))
-			return
-		}
-		w.WriteHeader(http.StatusInternalServerError)
-	})
-	setProxyURL(t, srv.URL)
-
-	combined := app.fetchAndCombine([]string{"https://example.com/good", "https://bad.invalid/x"}, "Mix")
-	if !strings.Contains(combined, "Failed to fetch article") {
-		t.Errorf("expected failure marker in mobi combine: %s", combined[:min(200, len(combined))])
-	}
-
-	body := app.buildEpubMultiArticleBody([]string{"https://example.com/good", "https://bad.invalid/x"}, "Mix")
-	if !strings.Contains(body, "Failed to fetch article") {
-		t.Errorf("expected failure marker in epub body")
-	}
-}
-
 func TestEmailAndEpubSingleWithComments(t *testing.T) {
 	// Article server + HN comments server (comments URL is HN).
 	articleSrv := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {

@@ -1,9 +1,8 @@
-package server
+package export
 
 import (
 	"bytes"
 	"encoding/binary"
-	"encoding/json"
 	"fmt"
 	"html"
 	"image"
@@ -26,15 +25,6 @@ import (
 	"golang.org/x/image/vp8l"
 	"golang.org/x/image/webp"
 )
-
-type MobiRequest struct {
-	URL         string   `json:"url"`  // single article
-	URLs        []string `json:"urls"` // multiple articles
-	Title       string   `json:"title"`
-	Author      string   `json:"author"`
-	CommentsURL string   `json:"commentsUrl"` // optional comments page URL
-	EmbedImages *bool    `json:"embedImages"` // embed images in MOBI (default true)
-}
 
 var (
 	imgAltRe       = regexp.MustCompile(`(?i)\balt="([^"]*)"`)
@@ -366,42 +356,6 @@ var unsafeCharsRe = regexp.MustCompile(`[^a-zA-Z0-9 ]+`)
 
 func sanitizeFilename(s string) string {
 	return strings.TrimSpace(unsafeCharsRe.ReplaceAllString(s, ""))
-}
-
-func (a *App) mobiHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		jsonError(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var req MobiRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		jsonError(w, "invalid request body", http.StatusBadRequest)
-		return
-	}
-	if req.URL == "" && len(req.URLs) == 0 {
-		jsonError(w, "url or urls field required", http.StatusBadRequest)
-		return
-	}
-
-	er := exportRequest{
-		url:         req.URL,
-		urls:        req.URLs,
-		commentsURL: req.CommentsURL,
-		title:       req.Title,
-		author:      req.Author,
-		embedImages: req.EmbedImages == nil || *req.EmbedImages,
-	}
-	rd := mobiRenderer{}
-	data, title, err := rd.render(a, er)
-	if err != nil {
-		jsonError(w, err.Error(), http.StatusBadGateway)
-		return
-	}
-
-	w.Header().Set("Content-Type", rd.mime())
-	w.Header().Set("Content-Disposition", `attachment; filename="`+exportFilename(title, rd.ext(), er.bulk())+`"`)
-	w.Write(data)
 }
 
 // mobiTOCPlaceholder is a fixed-width (10-digit) filepos value emitted by

@@ -1,4 +1,8 @@
-package server
+// Package export renders a set of source articles into a downloadable e-reader
+// document (EPUB or MOBI). Each format is a Renderer; content acquisition is
+// injected via the Fetcher interface so this package never depends on the HTTP
+// or content-scraping layers directly.
+package export
 
 import (
 	"fmt"
@@ -12,8 +16,69 @@ import (
 	readability "github.com/go-shiori/go-readability"
 )
 
-// fetchedArticle is the raw material produced by acquireArticles and consumed by
-// the format renderers.
+// Fetcher supplies the article content an export needs. content.Service
+// satisfies it; the interface is declared here (the consumer) to keep the
+// dependency arrow pointing export → content.
+type Fetcher interface {
+	FetchReadable(rawURL string) (readability.Article, error)
+	FetchComments(rawURL string) string
+}
+
+// Request is the format-agnostic description of an export job. A single article
+// (URL + optional CommentsURL) and a bulk export (URLs) share the same shape.
+type Request struct {
+	URL         string
+	URLs        []string
+	CommentsURL string
+	Title       string
+	Author      string
+	EmbedImages bool
+}
+
+func (req Request) bulk() bool { return len(req.URLs) > 0 }
+
+// Renderer turns a Request into a downloadable document. mobiRenderer and
+// epubRenderer are the implementations; a new output format means one more
+// Renderer, not another branch in the handlers.
+type Renderer interface {
+	Render(f Fetcher, req Request) (data []byte, title string, err error)
+	Ext() string
+	Mime() string
+}
+
+// RendererFor maps a "format" field to a Renderer (epub is the default).
+func RendererFor(format string) Renderer {
+	if format == "mobi" {
+		return mobiRenderer{}
+	}
+	return epubRenderer{}
+}
+
+// Filename builds the download filename: "<title>.<ext>" for a single article,
+// "<title>_<date>.<ext>" for a bulk export.
+func Filename(title, ext string, bulk bool) string {
+	name := sanitizeFilename(title)
+	if bulk {
+		return name + "_" + time.Now().Format("2006-01-02") + "." + ext
+	}
+	return name + "." + ext
+}
+
+// FilenameForRequest is Filename with the request's bulk-ness applied.
+func FilenameForRequest(req Request, title, ext string) string {
+	return Filename(title, ext, req.bulk())
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// fetchedArticle is the raw material produced by acquireArticles.
 type fetchedArticle struct {
 	url     string
 	title   string
@@ -23,10 +88,8 @@ type fetchedArticle struct {
 }
 
 // acquireArticles fetches every URL concurrently (max 5 in flight), preserving
-// input order. It is the single content-acquisition path shared by every bulk
-// exporter (MOBI, EPUB, email) — replacing what used to be two near-identical
-// goroutine loops.
-func (a *App) acquireArticles(urls []string) []fetchedArticle {
+// input order — the single content-acquisition path shared by both bulk formats.
+func acquireArticles(f Fetcher, urls []string) []fetchedArticle {
 	out := make([]fetchedArticle, len(urls))
 	sem := make(chan struct{}, 5)
 	var wg sync.WaitGroup
@@ -36,7 +99,7 @@ func (a *App) acquireArticles(urls []string) []fetchedArticle {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			article, err := a.content.FetchReadable(url)
+			article, err := f.FetchReadable(url)
 			if err != nil {
 				out[idx] = fetchedArticle{url: url, err: err}
 				return
@@ -53,79 +116,29 @@ func (a *App) acquireArticles(urls []string) []fetchedArticle {
 	return out
 }
 
-// exportRequest is the format-agnostic description of an export job. Both a
-// single article (url + optional commentsURL) and a bulk export (urls) flow
-// through the same shape.
-type exportRequest struct {
-	url         string
-	urls        []string
-	commentsURL string
-	title       string
-	author      string
-	embedImages bool
-}
-
-func (req exportRequest) bulk() bool { return len(req.urls) > 0 }
-
-// Renderer turns an export request into a downloadable document. mobiRenderer and
-// epubRenderer are the two implementations; a new output format means one more
-// Renderer, not another branch in three handlers.
-type Renderer interface {
-	render(a *App, req exportRequest) (data []byte, title string, err error)
-	ext() string
-	mime() string
-}
-
-// rendererForFormat maps the request "format" field to a Renderer (epub default).
-func rendererForFormat(format string) Renderer {
-	if format == "mobi" {
-		return mobiRenderer{}
-	}
-	return epubRenderer{}
-}
-
-// exportFilename builds the download filename: "<title>.<ext>" for a single
-// article, "<title>_<date>.<ext>" for a bulk export.
-func exportFilename(title, ext string, bulk bool) string {
-	name := sanitizeFilename(title)
-	if bulk {
-		return name + "_" + time.Now().Format("2006-01-02") + "." + ext
-	}
-	return name + "." + ext
-}
-
-func firstNonEmpty(vals ...string) string {
-	for _, v := range vals {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
-}
-
 // ── MOBI ──────────────────────────────────────────────────────────────────────
 
 type mobiRenderer struct{}
 
-func (mobiRenderer) ext() string  { return "mobi" }
-func (mobiRenderer) mime() string { return "application/x-mobipocket-ebook" }
+func (mobiRenderer) Ext() string  { return "mobi" }
+func (mobiRenderer) Mime() string { return "application/x-mobipocket-ebook" }
 
-func (mobiRenderer) render(a *App, req exportRequest) ([]byte, string, error) {
+func (mobiRenderer) Render(f Fetcher, req Request) ([]byte, string, error) {
 	var htmlContent, title string
 	if req.bulk() {
-		title = firstNonEmpty(req.title, "Articles")
-		htmlContent = a.fetchAndCombine(req.urls, title)
+		title = firstNonEmpty(req.Title, "Articles")
+		htmlContent = fetchAndCombine(f, req.URLs, title)
 	} else {
-		article, err := a.content.FetchReadable(req.url)
+		article, err := f.FetchReadable(req.URL)
 		if err != nil {
 			return nil, "", err
 		}
-		title = firstNonEmpty(req.title, article.Title, "Article")
-		htmlContent = a.mobiSingleBody(title, req.url, article, a.content.FetchComments(req.commentsURL))
+		title = firstNonEmpty(req.Title, article.Title, "Article")
+		htmlContent = mobiSingleBody(title, req.URL, article, f.FetchComments(req.CommentsURL))
 	}
 
 	var imageRecords [][]byte
-	if req.embedImages {
+	if req.EmbedImages {
 		htmlContent, imageRecords = downloadAndEmbedMobiImages(htmlContent)
 	}
 	// Resolve TOC filepos links to byte offsets after image embedding has fixed
@@ -134,7 +147,7 @@ func (mobiRenderer) render(a *App, req exportRequest) ([]byte, string, error) {
 
 	data, err := mobi.Write(mobi.Book{
 		Title:   title,
-		Author:  req.author,
+		Author:  req.Author,
 		Content: htmlContent,
 		TOC:     buildMobiTOC(htmlContent),
 	}, imageRecords)
@@ -144,7 +157,7 @@ func (mobiRenderer) render(a *App, req exportRequest) ([]byte, string, error) {
 // mobiSingleBody assembles a single-article MOBI document, including a
 // heading-derived table of contents (with a Comments entry) when there are at
 // least two navigation points.
-func (a *App) mobiSingleBody(title, url string, article readability.Article, commentsHTML string) string {
+func mobiSingleBody(title, url string, article readability.Article, commentsHTML string) string {
 	link := `<p><a href="` + html.EscapeString(url) + `">` + html.EscapeString(url) + `</a></p>`
 	annotated, labels := annotateArticleHeadings(article.Content, 0)
 	hasComments := commentsHTML != ""
@@ -180,8 +193,8 @@ func (a *App) mobiSingleBody(title, url string, article readability.Article, com
 
 // fetchAndCombine assembles a bulk MOBI document (filepos-based table of
 // contents) from the concurrently fetched articles.
-func (a *App) fetchAndCombine(urls []string, feedTitle string) string {
-	results := a.acquireArticles(urls)
+func fetchAndCombine(f Fetcher, urls []string, feedTitle string) string {
+	results := acquireArticles(f, urls)
 
 	var sb strings.Builder
 	sb.WriteString("<html><body>")
@@ -215,28 +228,28 @@ func (a *App) fetchAndCombine(urls []string, feedTitle string) string {
 
 type epubRenderer struct{}
 
-func (epubRenderer) ext() string  { return "epub" }
-func (epubRenderer) mime() string { return "application/epub+zip" }
+func (epubRenderer) Ext() string  { return "epub" }
+func (epubRenderer) Mime() string { return "application/epub+zip" }
 
-func (epubRenderer) render(a *App, req exportRequest) ([]byte, string, error) {
+func (epubRenderer) Render(f Fetcher, req Request) ([]byte, string, error) {
 	var body, title string
 	if req.bulk() {
-		title = firstNonEmpty(req.title, "Articles")
-		body = a.buildEpubMultiArticleBody(req.urls, title)
+		title = firstNonEmpty(req.Title, "Articles")
+		body = buildEpubMultiArticleBody(f, req.URLs, title)
 	} else {
-		article, err := a.content.FetchReadable(req.url)
+		article, err := f.FetchReadable(req.URL)
 		if err != nil {
 			return nil, "", err
 		}
-		title = firstNonEmpty(req.title, article.Title, "Article")
-		body = a.epubSingleBody(title, req.url, article, a.content.FetchComments(req.commentsURL))
+		title = firstNonEmpty(req.Title, article.Title, "Article")
+		body = epubSingleBody(title, req.URL, article, f.FetchComments(req.CommentsURL))
 	}
-	data, err := generateEpub(title, req.author, body, req.embedImages)
+	data, err := generateEpub(title, req.Author, body, req.EmbedImages)
 	return data, title, err
 }
 
 // epubSingleBody assembles a single-article EPUB body.
-func (a *App) epubSingleBody(title, url string, article readability.Article, commentsHTML string) string {
+func epubSingleBody(title, url string, article readability.Article, commentsHTML string) string {
 	link := `<p><a href="` + html.EscapeString(url) + `">` + html.EscapeString(url) + `</a></p>`
 	body := "<h1>" + html.EscapeString(title) + "</h1>" + link + content.ArticleMeta(article) + article.Content
 	if commentsHTML != "" {
@@ -247,8 +260,8 @@ func (a *App) epubSingleBody(title, url string, article readability.Article, com
 
 // buildEpubMultiArticleBody assembles a bulk EPUB body (anchor-based table of
 // contents) from the concurrently fetched articles.
-func (a *App) buildEpubMultiArticleBody(urls []string, feedTitle string) string {
-	results := a.acquireArticles(urls)
+func buildEpubMultiArticleBody(f Fetcher, urls []string, feedTitle string) string {
+	results := acquireArticles(f, urls)
 
 	var sb strings.Builder
 	sb.WriteString("<h1>" + html.EscapeString(feedTitle) + "</h1>")
