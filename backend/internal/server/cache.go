@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"bytes"
@@ -19,53 +19,55 @@ type responseCache struct {
 	entries map[string]cacheEntry
 }
 
-var globalCache = &responseCache{entries: make(map[string]cacheEntry)}
-
-func startCacheCleanup() {
+func (a *App) startCacheCleanup() {
 	go func() {
 		ticker := time.NewTicker(5 * time.Minute)
 		defer ticker.Stop()
 		for range ticker.C {
-			now := time.Now()
-			globalCache.mu.Lock()
-			for k, e := range globalCache.entries {
-				if now.After(e.expiresAt) {
-					delete(globalCache.entries, k)
-				}
-			}
-			globalCache.mu.Unlock()
+			a.cache.purgeExpired(time.Now())
 		}
 	}()
 }
 
+// purgeExpired drops every entry that expired at or before now.
+func (c *responseCache) purgeExpired(now time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for k, e := range c.entries {
+		if now.After(e.expiresAt) {
+			delete(c.entries, k)
+		}
+	}
+}
+
 // cached wraps a handler with a 5-minute in-memory cache keyed by the full request URL.
-func cached(next http.HandlerFunc) http.HandlerFunc {
+func (a *App) cached(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		key := r.URL.String()
 
-		globalCache.mu.Lock()
-		entry, ok := globalCache.entries[key]
+		a.cache.mu.Lock()
+		entry, ok := a.cache.entries[key]
 		if ok && time.Now().Before(entry.expiresAt) {
 			fmt.Println("cache hit (in-memory) for key:", key)
-			globalCache.mu.Unlock()
+			a.cache.mu.Unlock()
 			w.Header().Set("Content-Type", entry.contentType)
 			w.Header().Set("Cache-Control", "public, max-age=300")
 			w.Write(entry.body)
 			return
 		}
-		globalCache.mu.Unlock()
+		a.cache.mu.Unlock()
 
 		rec := &responseRecorder{header: make(http.Header)}
 		next.ServeHTTP(rec, r)
 
 		if rec.status == 0 || rec.status == http.StatusOK {
-			globalCache.mu.Lock()
-			globalCache.entries[key] = cacheEntry{
+			a.cache.mu.Lock()
+			a.cache.entries[key] = cacheEntry{
 				body:        rec.body.Bytes(),
 				contentType: rec.header.Get("Content-Type"),
 				expiresAt:   time.Now().Add(5 * time.Minute),
 			}
-			globalCache.mu.Unlock()
+			a.cache.mu.Unlock()
 		}
 
 		for k, vals := range rec.header {

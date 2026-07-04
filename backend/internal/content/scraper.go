@@ -1,9 +1,8 @@
-package main
+package content
 
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"log"
 	"net/http"
@@ -37,21 +36,21 @@ func feedItemsPruneInterval() time.Duration {
 	return time.Hour
 }
 
-func startFeedItemsPruner() {
+func (s *Service) StartFeedItemsPruner() {
 	go func() {
-		pruneFeedItems()
+		s.PruneFeedItems()
 		ticker := time.NewTicker(feedItemsPruneInterval())
 		defer ticker.Stop()
 		for range ticker.C {
-			pruneFeedItems()
+			s.PruneFeedItems()
 		}
 	}()
 }
 
-func pruneFeedItems() {
+func (s *Service) PruneFeedItems() {
 	ctx := context.Background()
 	hours := strconv.Itoa(feedItemsMaxAgeHours())
-	result, err := queries.DeleteOldFeedItems(ctx, sql.NullString{String: hours, Valid: true})
+	result, err := s.q.DeleteOldFeedItems(ctx, sql.NullString{String: hours, Valid: true})
 	if err != nil {
 		log.Printf("feed items pruner: error: %v", err)
 		return
@@ -62,21 +61,21 @@ func pruneFeedItems() {
 	}
 }
 
-func startFeedScraper() {
+func (s *Service) StartFeedScraper() {
 	go func() {
 		interval := feedScrapeInterval()
-		scrapeAllFeeds()
+		s.ScrapeAllFeeds()
 		log.Printf("feed scraper: next run in %s", interval)
 		for range time.Tick(interval) {
-			scrapeAllFeeds()
+			s.ScrapeAllFeeds()
 			log.Printf("feed scraper: next run in %s", interval)
 		}
 	}()
 }
 
-func scrapeAllFeeds() {
+func (s *Service) ScrapeAllFeeds() {
 	ctx := context.Background()
-	urls, err := queries.GetDistinctSavedFeedURLs(ctx)
+	urls, err := s.q.GetDistinctSavedFeedURLs(ctx)
 	if err != nil {
 		log.Printf("feed scraper: failed to get feed URLs: %v", err)
 		return
@@ -86,12 +85,12 @@ func scrapeAllFeeds() {
 	}
 	log.Printf("feed scraper: scraping %d feeds", len(urls))
 	for _, feedURL := range urls {
-		scrapeFeed(feedURL)
+		s.ScrapeFeed(feedURL)
 	}
 }
 
-func scrapeFeed(feedURL string) {
-	resp, err := fetchAndParseFeed(feedURL)
+func (s *Service) ScrapeFeed(feedURL string) {
+	resp, err := s.FetchAndParseFeed(feedURL)
 	if err != nil {
 		log.Printf("feed scraper: failed to fetch %s: %v", feedURL, err)
 		return
@@ -120,7 +119,7 @@ func scrapeFeed(feedURL string) {
 			pubDate = t.UTC().Format(time.RFC3339)
 		}
 		commentsUrl := sql.NullString{String: article.Comments, Valid: article.Comments != ""}
-		res, err := queries.InsertFeedItem(ctx, db.InsertFeedItemParams{
+		res, err := s.q.InsertFeedItem(ctx, db.InsertFeedItemParams{
 			FeedUrl:     feedURL,
 			ItemUrl:     article.Link,
 			Title:       article.Title,
@@ -138,12 +137,12 @@ func scrapeFeed(feedURL string) {
 	log.Printf("feed scraper: done %q — %d new, %d already seen", feedTitle, newCount, len(resp.Articles)-newCount)
 }
 
-// startContentArchiver polls for feed items that haven't been fully archived yet
+// StartContentArchiver polls for feed items that haven't been fully archived yet
 // and fetches their article content in the background.
-func startContentArchiver() {
+func (s *Service) StartContentArchiver() {
 	go func() {
 		for {
-			if pollContentArchive() {
+			if s.PollContentArchive() {
 				time.Sleep(2 * time.Second)
 			} else {
 				time.Sleep(5 * time.Second)
@@ -161,8 +160,8 @@ func contentArchiverTimeout() time.Duration {
 
 // fetchReadableBackground fetches an article with a short timeout, falling
 // back to the proxy on error — suitable for best-effort background archiving.
-func fetchReadableBackground(rawURL string) (readability.Article, error) {
-	client := newScrappingClient(ScrappingClientConfig{Timeout: contentArchiverTimeout(), WithProxy: true, UseProxyFirst: true})
+func (s *Service) fetchReadableBackground(rawURL string) (readability.Article, error) {
+	client := s.newClient(ScrappingClientConfig{Timeout: contentArchiverTimeout(), WithProxy: true, UseProxyFirst: true})
 	req, err := http.NewRequest("GET", rawURL, nil)
 	if err != nil {
 		return readability.Article{}, err
@@ -176,9 +175,9 @@ func fetchReadableBackground(rawURL string) (readability.Article, error) {
 	return readability.FromReader(resp.Body, parsedURL)
 }
 
-func pollContentArchive() bool {
+func (s *Service) PollContentArchive() bool {
 	ctx := context.Background()
-	itemURL, err := queries.GetNextFeedItemWithoutArchive(ctx)
+	itemURL, err := s.q.GetNextFeedItemWithoutArchive(ctx)
 	if err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
 			log.Printf("content archiver query error: %v", err)
@@ -186,10 +185,10 @@ func pollContentArchive() bool {
 		return false
 	}
 
-	article, err := fetchReadableBackground(itemURL)
+	article, err := s.fetchReadableBackground(itemURL)
 	if err != nil {
 		log.Printf("content archiver: skipping %s: %v", itemURL, err)
-		if err := queries.MarkFeedItemArchiveFailed(ctx, itemURL); err != nil {
+		if err := s.q.MarkFeedItemArchiveFailed(ctx, itemURL); err != nil {
 			log.Printf("content archiver: failed to mark %s as failed: %v", itemURL, err)
 		}
 		return true
@@ -199,70 +198,61 @@ func pollContentArchive() bool {
 	if article.PublishedTime != nil {
 		publishedTime = article.PublishedTime.Format("2 January 2006")
 	}
-	archiveArticle(itemURL, article.Title, article.Byline, article.SiteName, publishedTime, article.Content, article.TextContent)
+	s.ArchiveArticle(itemURL, article.Title, article.Byline, article.SiteName, publishedTime, article.Content, article.TextContent)
 
 	log.Printf("content archiver: archived %s", itemURL)
 	return true
 }
 
-func feedArchiveHandler(w http.ResponseWriter, r *http.Request) {
-	feedURL := r.URL.Query().Get("url")
-	if feedURL == "" {
-		jsonError(w, "url parameter required", http.StatusBadRequest)
-		return
-	}
+// ArchiveArticle is one item in a paginated feed-archive page.
+type ArchiveArticle struct {
+	Index       int    `json:"index"`
+	Title       string `json:"title"`
+	Link        string `json:"link"`
+	Description string `json:"description"`
+	PubDate     string `json:"pubDate"`
+	Comments    string `json:"comments"`
+}
 
-	limit := int64(50)
-	if v, err := strconv.ParseInt(r.URL.Query().Get("limit"), 10, 64); err == nil && v > 0 && v <= 100 {
-		limit = v
-	}
-	offset := int64(0)
-	if v, err := strconv.ParseInt(r.URL.Query().Get("offset"), 10, 64); err == nil && v >= 0 {
-		offset = v
-	}
+// FeedArchivePage is a paginated slice of a feed's archived items.
+type FeedArchivePage struct {
+	Articles []ArchiveArticle `json:"articles"`
+	Total    int64            `json:"total"`
+	HasMore  bool             `json:"hasMore"`
+}
 
+// FeedArchive returns a page of archived items for the given feed URL.
+func (s *Service) FeedArchive(feedURL string, limit, offset int64) (FeedArchivePage, error) {
 	ctx := context.Background()
-	rows, err := queries.GetFeedArchiveItems(ctx, db.GetFeedArchiveItemsParams{
+	rows, err := s.q.GetFeedArchiveItems(ctx, db.GetFeedArchiveItemsParams{
 		FeedUrl: feedURL,
 		Limit:   limit,
 		Offset:  offset,
 	})
 	if err != nil {
-		jsonError(w, "failed to query archive", http.StatusInternalServerError)
-		return
+		return FeedArchivePage{}, err
 	}
 
-	total, err := queries.CountFeedArchiveItems(ctx, feedURL)
+	total, err := s.q.CountFeedArchiveItems(ctx, feedURL)
 	if err != nil {
 		total = 0
 	}
 
-	type archiveArticle struct {
-		Index       int    `json:"index"`
-		Title       string `json:"title"`
-		Link        string `json:"link"`
-		Description string `json:"description"`
-		PubDate     string `json:"pubDate"`
-		Comments    string `json:"comments"`
-	}
-
-	articles := make([]archiveArticle, len(rows))
+	articles := make([]ArchiveArticle, len(rows))
 	for i, row := range rows {
-		comments := row.CommentsUrl.String
-		articles[i] = archiveArticle{
+		articles[i] = ArchiveArticle{
 			Index:       int(offset) + i,
 			Title:       row.Title,
 			Link:        row.ItemUrl,
 			Description: row.Description,
 			PubDate:     row.PubDate,
-			Comments:    comments,
+			Comments:    row.CommentsUrl.String,
 		}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"articles": articles,
-		"total":    total,
-		"hasMore":  offset+int64(len(rows)) < total,
-	})
+	return FeedArchivePage{
+		Articles: articles,
+		Total:    total,
+		HasMore:  offset+int64(len(rows)) < total,
+	}, nil
 }

@@ -1,7 +1,8 @@
-package main
+package content
 
 import (
 	"encoding/json"
+	"fmt"
 	"html"
 	"io"
 	"net/http"
@@ -14,37 +15,31 @@ type RedditPostResponse struct {
 	ContentHTML string `json:"content_html"`
 }
 
-func redditPostHandler(w http.ResponseWriter, r *http.Request) {
-	rawURL := r.URL.Query().Get("url")
-	if rawURL == "" {
-		jsonError(w, "url parameter required", http.StatusBadRequest)
-		return
-	}
+// RedditPost fetches a Reddit post's JSON and extracts its self-text HTML (or the
+// linked article URL for link posts).
+func (s *Service) RedditPost(rawURL string) (RedditPostResponse, error) {
+	var out RedditPostResponse
 
-	client := newScrappingClient(ScrappingClientConfig{Timeout: 15 * time.Second, WithProxy: true, UseProxyFirst: true})
+	client := s.newClient(ScrappingClientConfig{Timeout: 15 * time.Second, WithProxy: true, UseProxyFirst: true})
 	req, err := http.NewRequest("GET", rawURL, nil)
 	if err != nil {
-		jsonError(w, err.Error(), http.StatusBadRequest)
-		return
+		return out, err
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		jsonError(w, err.Error(), http.StatusBadGateway)
-		return
+		return out, err
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		jsonError(w, err.Error(), http.StatusBadGateway)
-		return
+		return out, err
 	}
 
 	// Reddit JSON is a 2-element array: [post_listing, comments_listing]
 	var listings []json.RawMessage
 	if err := json.Unmarshal(body, &listings); err != nil || len(listings) == 0 {
-		jsonError(w, "failed to parse Reddit JSON", http.StatusBadGateway)
-		return
+		return out, fmt.Errorf("failed to parse Reddit JSON")
 	}
 
 	var postListing struct {
@@ -61,20 +56,17 @@ func redditPostHandler(w http.ResponseWriter, r *http.Request) {
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(listings[0], &postListing); err != nil || len(postListing.Data.Children) == 0 {
-		jsonError(w, "unexpected Reddit JSON structure", http.StatusBadGateway)
-		return
+		return out, fmt.Errorf("unexpected Reddit JSON structure")
 	}
 
 	postData := postListing.Data.Children[0].Data
 
 	// Determine the actual article URL
-	actualURL := ""
 	if !postData.IsSelf && postData.URL != "" {
-		actualURL = postData.URL
+		out.ActualURL = postData.URL
 	}
 
 	// Build content HTML from selftext_html or selftext
-	contentHTML := ""
 	if postData.SelftextHTML != "" {
 		// selftext_html is HTML-entity-encoded; decode it
 		decoded := html.UnescapeString(postData.SelftextHTML)
@@ -85,14 +77,10 @@ func redditPostHandler(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(decoded, `<div class="md">`) && strings.HasSuffix(decoded, "</div>") {
 			decoded = decoded[len(`<div class="md">`) : len(decoded)-len("</div>")]
 		}
-		contentHTML = decoded
+		out.ContentHTML = decoded
 	} else if postData.Selftext != "" {
-		contentHTML = "<p>" + html.EscapeString(postData.Selftext) + "</p>"
+		out.ContentHTML = "<p>" + html.EscapeString(postData.Selftext) + "</p>"
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(RedditPostResponse{
-		ActualURL:   actualURL,
-		ContentHTML: contentHTML,
-	})
+	return out, nil
 }

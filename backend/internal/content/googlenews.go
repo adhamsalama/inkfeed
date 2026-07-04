@@ -1,4 +1,4 @@
-package main
+package content
 
 import (
 	"encoding/json"
@@ -12,28 +12,17 @@ import (
 	"golang.org/x/net/html"
 )
 
-type GoogleNewsResponse struct {
-	DecodedURL string `json:"decoded_url"`
-}
-
-func decodeGoogleNewsHandler(w http.ResponseWriter, r *http.Request) {
-	rawURL := r.URL.Query().Get("url")
-	if rawURL == "" {
-		jsonError(w, "url parameter required", http.StatusBadRequest)
-		return
+// External Google News endpoints. Package vars so tests can redirect them to an
+// httptest server. %s is substituted with the base64 article id.
+var (
+	googleNewsArticleURLs = []string{
+		"https://news.google.com/articles/%s",
+		"https://news.google.com/rss/articles/%s",
 	}
+	googleNewsBatchExecuteURL = "https://news.google.com/_/DotsSplashUi/data/batchexecute"
+)
 
-	decoded, err := decodeGoogleNewsURL(rawURL)
-	if err != nil {
-		jsonError(w, err.Error(), http.StatusBadGateway)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(GoogleNewsResponse{DecodedURL: decoded})
-}
-
-func decodeGoogleNewsURL(sourceURL string) (string, error) {
+func DecodeGoogleNewsURL(sourceURL string) (string, error) {
 	base64Str, err := extractBase64(sourceURL)
 	if err != nil {
 		return "", err
@@ -69,9 +58,9 @@ func extractBase64(sourceURL string) (string, error) {
 func getDecodingParams(base64Str string) (sig, ts string, err error) {
 	client := &http.Client{Timeout: 15 * time.Second}
 
-	urls := []string{
-		"https://news.google.com/articles/" + base64Str,
-		"https://news.google.com/rss/articles/" + base64Str,
+	urls := make([]string, len(googleNewsArticleURLs))
+	for i, tmpl := range googleNewsArticleURLs {
+		urls[i] = fmt.Sprintf(tmpl, base64Str)
 	}
 
 	for _, u := range urls {
@@ -153,7 +142,7 @@ func decodeViaAPI(base64Str, sig, ts string) (string, error) {
 	postData := "f.req=" + url.QueryEscape(string(payloadJSON))
 
 	client := &http.Client{Timeout: 15 * time.Second}
-	req, _ := http.NewRequest("POST", "https://news.google.com/_/DotsSplashUi/data/batchexecute", strings.NewReader(postData))
+	req, _ := http.NewRequest("POST", googleNewsBatchExecuteURL, strings.NewReader(postData))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded;charset=UTF-8")
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36")
 

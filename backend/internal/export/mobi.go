@@ -1,9 +1,8 @@
-package main
+package export
 
 import (
 	"bytes"
 	"encoding/binary"
-	"encoding/json"
 	"fmt"
 	"html"
 	"image"
@@ -16,9 +15,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
-	"time"
 
+	"github.com/adhamsalama/inkfeed-backend/internal/content"
 	"github.com/adhamsalama/inkfeed-backend/mobi"
 	"github.com/srwiley/oksvg"
 	"github.com/srwiley/rasterx"
@@ -27,15 +25,6 @@ import (
 	"golang.org/x/image/vp8l"
 	"golang.org/x/image/webp"
 )
-
-type MobiRequest struct {
-	URL         string   `json:"url"`          // single article
-	URLs        []string `json:"urls"`         // multiple articles
-	Title       string   `json:"title"`
-	Author      string   `json:"author"`
-	CommentsURL string   `json:"commentsUrl"`  // optional comments page URL
-	EmbedImages *bool    `json:"embedImages"`  // embed images in MOBI (default true)
-}
 
 var (
 	imgAltRe       = regexp.MustCompile(`(?i)\balt="([^"]*)"`)
@@ -107,7 +96,7 @@ func downloadAndEmbedMobiImages(bodyHTML string) (string, [][]byte) {
 		// "Desktop" and "Mobile" variants of the same figure that CSS media
 		// queries would hide, but without CSS both would render. Keep the first
 		// variant seen and drop the rest.
-		if key := responsiveVariantKey(useURL); key != "" {
+		if key := content.ResponsiveVariantKey(useURL); key != "" {
 			if variantSeen[key] {
 				return ""
 			}
@@ -129,7 +118,7 @@ func downloadAndEmbedMobiImages(bodyHTML string) (string, [][]byte) {
 				log.Printf("mobi: failed to create image request %s: %v", useURL, err)
 				return imgTag
 			}
-			imgReq.Header.Set("User-Agent", userAgent)
+			imgReq.Header.Set("User-Agent", content.UserAgent)
 			resp, err := http.DefaultClient.Do(imgReq)
 			if err != nil {
 				log.Printf("mobi: failed to download image %s: %v", useURL, err)
@@ -204,18 +193,6 @@ func downloadAndEmbedMobiImages(bodyHTML string) (string, [][]byte) {
 	return result, imageRecords
 }
 
-// responsiveVariantKey returns a normalized key identifying a responsive image
-// variant, or "" if the URL carries no responsive marker (so it never
-// participates in dedup). It strips the "desktop"/"mobile" tokens so the two
-// variants of the same figure collapse to the same key.
-func responsiveVariantKey(u string) string {
-	lower := strings.ToLower(u)
-	if !strings.Contains(lower, "desktop") && !strings.Contains(lower, "mobile") {
-		return ""
-	}
-	return strings.NewReplacer("desktop", "", "mobile", "").Replace(lower)
-}
-
 // mobiImgTag returns an <img> tag with recindex="N" (preserving alt if present).
 func mobiImgTag(original string, recindex int) string {
 	alt := ""
@@ -258,8 +235,10 @@ func insertJFIFHeader(j []byte) []byte {
 		return j // already has an APP0 segment
 	}
 	// FF E0, length 16, "JFIF\0", version 1.1, units=0, X/Y density 1, no thumb.
-	app0 := []byte{0xFF, 0xE0, 0x00, 0x10, 'J', 'F', 'I', 'F', 0x00,
-		0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00}
+	app0 := []byte{
+		0xFF, 0xE0, 0x00, 0x10, 'J', 'F', 'I', 'F', 0x00,
+		0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00,
+	}
 	out := make([]byte, 0, len(j)+len(app0))
 	out = append(out, j[0], j[1])
 	out = append(out, app0...)
@@ -379,181 +358,18 @@ func sanitizeFilename(s string) string {
 	return strings.TrimSpace(unsafeCharsRe.ReplaceAllString(s, ""))
 }
 
-func mobiHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		jsonError(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var req MobiRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		jsonError(w, "invalid request body", http.StatusBadRequest)
-		return
-	}
-
-	var htmlContent string
-
-	switch {
-	case req.URL != "":
-		article, err := fetchReadable(req.URL)
-		if err != nil {
-			jsonError(w, err.Error(), http.StatusBadGateway)
-			return
-		}
-		if req.Title == "" {
-			req.Title = article.Title
-		}
-		commentsHTML := fetchCommentsHTML(req.CommentsURL)
-		link := `<p><a href="` + html.EscapeString(req.URL) + `">` + html.EscapeString(req.URL) + `</a></p>`
-
-		// Build a table of contents from the article's section headings (plus a
-		// Comments entry when present). Only worthwhile when there are at least
-		// two navigation points; otherwise fall back to a plain document.
-		annotated, labels := annotateArticleHeadings(article.Content, 0)
-		hasComments := commentsHTML != ""
-		total := len(labels)
-		if hasComments {
-			total++
-		}
-
-		var sb strings.Builder
-		sb.WriteString("<html><body><h1>" + html.EscapeString(req.Title) + "</h1>" + link + articleMetaHTML(article))
-		if total >= 2 {
-			sb.WriteString("<h2>Contents</h2><ul>")
-			for _, l := range labels {
-				sb.WriteString(fmt.Sprintf(`<li><a filepos="%s">%s</a></li>`, mobiTOCPlaceholder, html.EscapeString(l)))
-			}
-			if hasComments {
-				sb.WriteString(fmt.Sprintf(`<li><a filepos="%s">Comments</a></li>`, mobiTOCPlaceholder))
-			}
-			sb.WriteString("</ul><mbp:pagebreak/><hr/>")
-			sb.WriteString(annotated)
-			if hasComments {
-				sb.WriteString(fmt.Sprintf(`<hr/><a name="inkfeed-toc-%d"></a><h2>Comments</h2>`, len(labels)) + commentsHTML)
-			}
-		} else {
-			sb.WriteString(article.Content)
-			if hasComments {
-				sb.WriteString("<hr/><h2>Comments</h2>" + commentsHTML)
-			}
-		}
-		sb.WriteString("</body></html>")
-		htmlContent = sb.String()
-
-	case len(req.URLs) > 0:
-		htmlContent = fetchAndCombine(req.URLs, req.Title)
-
-	default:
-		jsonError(w, "url or urls field required", http.StatusBadRequest)
-		return
-	}
-
-	embedImages := req.EmbedImages == nil || *req.EmbedImages
-	var imageRecords [][]byte
-	if embedImages {
-		htmlContent, imageRecords = downloadAndEmbedMobiImages(htmlContent)
-	}
-
-	// Resolve the table-of-contents filepos links to their byte offsets. This
-	// must run last, after image embedding has shifted the final byte layout.
-	htmlContent = patchMobiTOCFilepos(htmlContent)
-
-	data, err := mobi.Write(mobi.Book{
-		Title:   req.Title,
-		Author:  req.Author,
-		Content: htmlContent,
-		TOC:     buildMobiTOC(htmlContent),
-	}, imageRecords)
-	if err != nil {
-		jsonError(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	var filename string
-	if len(req.URLs) > 0 {
-		filename = sanitizeFilename(req.Title) + "_" + time.Now().Format("2006-01-02") + ".mobi"
-	} else {
-		filename = sanitizeFilename(req.Title) + ".mobi"
-	}
-	w.Header().Set("Content-Type", "application/x-mobipocket-ebook")
-	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
-	w.Write(data)
-}
-
-// fetchAndCombine fetches all URLs concurrently (max 5 at a time) and
-// returns a single HTML document combining all article contents.
-func fetchAndCombine(urls []string, feedTitle string) string {
-	type result struct {
-		index   int
-		title   string
-		meta    string
-		content string
-		err     error
-	}
-
-	results := make([]result, len(urls))
-	sem := make(chan struct{}, 5)
-	var wg sync.WaitGroup
-
-	for i, u := range urls {
-		wg.Add(1)
-		go func(idx int, url string) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-			article, err := fetchReadable(url)
-			if err != nil {
-				results[idx] = result{index: idx, err: err}
-				return
-			}
-			results[idx] = result{index: idx, title: article.Title, meta: articleMetaHTML(article), content: `<p><a href="` + html.EscapeString(url) + `">` + html.EscapeString(url) + `</a></p>` + article.Content}
-		}(i, u)
-	}
-	wg.Wait()
-
-	var sb strings.Builder
-	sb.WriteString("<html><body>")
-	sb.WriteString("<h1>" + html.EscapeString(feedTitle) + "</h1>")
-
-	// Table of contents: one filepos link per article. The filepos values are
-	// placeholders here and are rewritten to real byte offsets by
-	// patchMobiTOCFilepos once the final HTML layout is known. Each link points
-	// at the matching <a name="inkfeed-toc-N"> anchor emitted before its article.
-	sb.WriteString("<h2>Contents</h2><ul>")
-	for _, r := range results {
-		title := r.title
-		if r.err != nil || title == "" {
-			title = "[Failed to fetch article]"
-		}
-		sb.WriteString(fmt.Sprintf(`<li><a filepos="%s">%s</a></li>`, mobiTOCPlaceholder, html.EscapeString(title)))
-	}
-	sb.WriteString("</ul><mbp:pagebreak/><hr/>")
-
-	for i, r := range results {
-		sb.WriteString(fmt.Sprintf(`<a name="inkfeed-toc-%d"></a>`, i))
-		if r.err != nil {
-			sb.WriteString("<h2>[Failed to fetch article]</h2><hr/>")
-		} else {
-			sb.WriteString("<h2>" + html.EscapeString(r.title) + "</h2>")
-			sb.WriteString(r.meta)
-			sb.WriteString(r.content)
-			sb.WriteString("<hr/>")
-		}
-	}
-	sb.WriteString("</body></html>")
-	return sb.String()
-}
-
 // mobiTOCPlaceholder is a fixed-width (10-digit) filepos value emitted by
 // fetchAndCombine. patchMobiTOCFilepos rewrites each occurrence in place with a
 // real byte offset; keeping the width fixed means the rewrite never shifts the
 // byte layout, so offsets computed on the assembled document stay valid.
 const mobiTOCPlaceholder = "0000000000"
 
-var mobiTOCAnchorRe = regexp.MustCompile(`<a name="inkfeed-toc-(\d+)"></a>`)
-var mobiTOCLabelRe = regexp.MustCompile(`(?is)<h[1-6][^>]*>(.*?)</h[1-6]>`)
-var mobiTagStripRe = regexp.MustCompile(`<[^>]*>`)
-var mobiHeadingRe = regexp.MustCompile(`(?is)<h[1-4][^>]*>(.*?)</h[1-4]>`)
+var (
+	mobiTOCAnchorRe = regexp.MustCompile(`<a name="inkfeed-toc-(\d+)"></a>`)
+	mobiTOCLabelRe  = regexp.MustCompile(`(?is)<h[1-6][^>]*>(.*?)</h[1-6]>`)
+	mobiTagStripRe  = regexp.MustCompile(`<[^>]*>`)
+	mobiHeadingRe   = regexp.MustCompile(`(?is)<h[1-4][^>]*>(.*?)</h[1-4]>`)
+)
 
 // annotateArticleHeadings inserts a TOC anchor (<a name="inkfeed-toc-N">) before
 // each heading in an article body, numbering from startIdx, and returns the
