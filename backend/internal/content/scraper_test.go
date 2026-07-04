@@ -62,8 +62,20 @@ func TestScrapeFeed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) == 0 {
-		t.Fatalf("expected feed items inserted")
+	if len(items) != 2 {
+		t.Fatalf("expected 2 feed items, got %d", len(items))
+	}
+	// Verify the parsed fields actually landed (not just row count). Items come
+	// back newest-first; both rssSample items must be present with their content.
+	byURL := map[string]string{}
+	for _, it := range items {
+		byURL[it.ItemUrl] = it.Title
+	}
+	if byURL["https://example.com/1"] != "Post One" {
+		t.Errorf("item 1 title = %q, want Post One", byURL["https://example.com/1"])
+	}
+	if byURL["https://reddit.com/r/go/comments/abc"] != "Reddit Post" {
+		t.Errorf("reddit item title = %q, want Reddit Post", byURL["https://reddit.com/r/go/comments/abc"])
 	}
 
 	// Scraping again inserts no new items (UNIQUE constraint).
@@ -101,12 +113,34 @@ func TestScrapeAllFeeds(t *testing.T) {
 
 func TestPruneFeedItems(t *testing.T) {
 	resetDB(t)
-	// Insert an item, then prune with huge max age -> nothing deleted.
-	scrapeFeedInsert(t, "feedx", "itemx")
+
+	// A recent item survives the default (14-day) window.
+	scrapeFeedInsert(t, "feedx", "recent")
 	svc.PruneFeedItems()
+	if total, _ := svc.q.CountFeedArchiveItems(context.Background(), "feedx"); total != 1 {
+		t.Fatalf("recent item wrongly pruned: %d", total)
+	}
+
+	// An item older than the window IS deleted. Backdate its scraped_at and set a
+	// 1-hour max age so the prune actually removes something.
+	scrapeFeedInsert(t, "feedx", "old")
+	if _, err := testDB.Exec(`UPDATE feed_items SET scraped_at = datetime('now','-30 days') WHERE item_url = 'old'`); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FEED_ITEMS_MAX_AGE_HOURS", "1")
+
+	svc.PruneFeedItems()
+
 	total, _ := svc.q.CountFeedArchiveItems(context.Background(), "feedx")
 	if total != 1 {
-		t.Errorf("recent item wrongly pruned: %d", total)
+		t.Errorf("expected only the recent item to remain, got total=%d", total)
+	}
+	// The old one specifically must be gone, the recent one must remain.
+	rows, _ := svc.q.GetFeedArchiveItems(context.Background(), feedArchiveParams("feedx"))
+	for _, r := range rows {
+		if r.ItemUrl == "old" {
+			t.Errorf("old item should have been pruned")
+		}
 	}
 }
 

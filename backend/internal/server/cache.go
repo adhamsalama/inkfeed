@@ -24,16 +24,20 @@ func (a *App) startCacheCleanup() {
 		ticker := time.NewTicker(5 * time.Minute)
 		defer ticker.Stop()
 		for range ticker.C {
-			now := time.Now()
-			a.cache.mu.Lock()
-			for k, e := range a.cache.entries {
-				if now.After(e.expiresAt) {
-					delete(a.cache.entries, k)
-				}
-			}
-			a.cache.mu.Unlock()
+			a.cache.purgeExpired(time.Now())
 		}
 	}()
+}
+
+// purgeExpired drops every entry that expired at or before now.
+func (c *responseCache) purgeExpired(now time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for k, e := range c.entries {
+		if now.After(e.expiresAt) {
+			delete(c.entries, k)
+		}
+	}
 }
 
 // cached wraps a handler with a 5-minute in-memory cache keyed by the full request URL.

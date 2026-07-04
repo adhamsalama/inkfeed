@@ -46,6 +46,19 @@ func TestArticle(t *testing.T) {
 }
 
 func TestComments(t *testing.T) {
+	// success: HN route returns rendered comment HTML
+	hn := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"id":1,"children":[{"id":2,"author":"bob","text":"hello there","children":[]}]}`))
+	})
+	setProxyURL(t, hn.URL)
+	out, err := svc.Comments("https://news.ycombinator.com/item?id=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "bob") || !strings.Contains(out, "hello there") {
+		t.Errorf("comments html missing rendered content: %q", out)
+	}
+
 	// error path (unreachable generic URL, both proxy+direct dead)
 	setProxyURL(t, "http://127.0.0.1:0/dead")
 	if _, err := svc.Comments("http://127.0.0.1:0/dead-generic"); err == nil {

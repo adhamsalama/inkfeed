@@ -295,7 +295,6 @@ func TestFeedItemsQueries(t *testing.T) {
 }
 
 func TestWithTx(t *testing.T) {
-	q := newTestQueries(t)
 	ctx := context.Background()
 	dir := t.TempDir()
 	sqlDB, err := sql.Open("sqlite", filepath.Join(dir, "tx.db"))
@@ -307,21 +306,35 @@ func TestWithTx(t *testing.T) {
 	sqlDB.Exec(string(schema))
 	qt := New(sqlDB)
 
+	// Committed transaction: the user is visible afterwards.
 	tx, err := sqlDB.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	txq := qt.WithTx(tx)
-	if _, err := txq.CreateUser(ctx, CreateUserParams{Email: "tx@b.com", PasswordHash: "h"}); err != nil {
+	if _, err := qt.WithTx(tx).CreateUser(ctx, CreateUserParams{Email: "commit@b.com", PasswordHash: "h"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := qt.GetUserByEmail(ctx, "tx@b.com"); err != nil {
+	if _, err := qt.GetUserByEmail(ctx, "commit@b.com"); err != nil {
 		t.Errorf("committed tx user missing: %v", err)
 	}
-	_ = q
+
+	// Rolled-back transaction: the write is discarded.
+	tx2, err := sqlDB.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := qt.WithTx(tx2).CreateUser(ctx, CreateUserParams{Email: "rollback@b.com", PasswordHash: "h"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx2.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := qt.GetUserByEmail(ctx, "rollback@b.com"); err != sql.ErrNoRows {
+		t.Errorf("rolled-back user should be absent, got err=%v", err)
+	}
 }
 
 func TestRateLimitQueries(t *testing.T) {

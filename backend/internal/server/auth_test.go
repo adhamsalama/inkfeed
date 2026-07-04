@@ -74,8 +74,19 @@ func TestSignupHandler(t *testing.T) {
 	if w.Code != http.StatusCreated {
 		t.Fatalf("signup = %d body=%s", w.Code, w.Body.String())
 	}
-	if !strings.Contains(w.Header().Get("Set-Cookie"), "session=") {
-		t.Errorf("no session cookie set")
+	cookies := w.Result().Cookies()
+	var session *http.Cookie
+	for _, c := range cookies {
+		if c.Name == "session" {
+			session = c
+		}
+	}
+	if session == nil || len(session.Value) < 32 || !session.HttpOnly {
+		t.Errorf("session cookie missing/weak: %+v", session)
+	}
+	// The token must correspond to a real session row for this user.
+	if _, err := app.q.GetSession(context.Background(), session.Value); err != nil {
+		t.Errorf("session token not persisted: %v", err)
 	}
 
 	// Duplicate email -> conflict

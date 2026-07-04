@@ -81,34 +81,27 @@ func TestResponseRecorder(t *testing.T) {
 	}
 }
 
-func TestStartCacheCleanup(t *testing.T) {
-	// Insert an already-expired entry, then confirm the cleanup logic removes it.
-	// We call the cleanup body directly rather than wait 5 minutes.
-	app.cache.mu.Lock()
-	app.cache.entries = map[string]cacheEntry{
+func TestPurgeExpired(t *testing.T) {
+	c := &responseCache{entries: map[string]cacheEntry{
 		"expired": {expiresAt: time.Now().Add(-time.Minute)},
 		"fresh":   {expiresAt: time.Now().Add(time.Minute)},
-	}
-	app.cache.mu.Unlock()
+	}}
 
-	// startCacheCleanup only spawns a goroutine; exercise it for coverage.
+	// Exercise the actual purge logic used by the cleanup goroutine.
+	c.purgeExpired(time.Now())
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if _, ok := c.entries["expired"]; ok {
+		t.Errorf("expired entry not purged")
+	}
+	if _, ok := c.entries["fresh"]; !ok {
+		t.Errorf("fresh entry wrongly purged")
+	}
+}
+
+func TestStartCacheCleanup(t *testing.T) {
+	// Only spawns a goroutine with a 5-minute ticker; exercise for coverage.
+	// The purge behavior itself is verified by TestPurgeExpired.
 	app.startCacheCleanup()
-
-	now := time.Now()
-	app.cache.mu.Lock()
-	for k, e := range app.cache.entries {
-		if now.After(e.expiresAt) {
-			delete(app.cache.entries, k)
-		}
-	}
-	_, expiredStillThere := app.cache.entries["expired"]
-	_, freshThere := app.cache.entries["fresh"]
-	app.cache.mu.Unlock()
-
-	if expiredStillThere {
-		t.Errorf("expired entry not cleaned")
-	}
-	if !freshThere {
-		t.Errorf("fresh entry wrongly removed")
-	}
 }
