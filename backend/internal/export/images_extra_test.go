@@ -98,6 +98,35 @@ func riffChunk(fourcc string, payload []byte) []byte {
 	return append(out, body...)
 }
 
+// When an image is detected as webp/png but fails to convert, it must be dropped
+// (the <img> left untouched, no record) rather than embedding bytes Kindle can't
+// render.
+func TestDownloadAndEmbedMobiImagesConversionFailure(t *testing.T) {
+	srv := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "webp"):
+			// Valid RIFF/WEBP header so it sniffs as webp, but a garbage VP8 body
+			// that decoding rejects.
+			w.Write(append([]byte("RIFF\x0c\x00\x00\x00WEBPVP8 "), []byte("garbage")...))
+		case strings.Contains(r.URL.Path, "png"):
+			// PNG magic so it sniffs as png, but truncated so decode fails.
+			w.Write(append([]byte("\x89PNG\r\n\x1a\n"), []byte("garbage")...))
+		}
+	})
+
+	html := `<img src="` + srv.URL + `/bad.webp"><img src="` + srv.URL + `/bad.png">`
+	out, records := downloadAndEmbedMobiImages(html)
+	if len(records) != 0 {
+		t.Errorf("unconvertible images should be dropped, got %d records", len(records))
+	}
+	if strings.Contains(out, "recindex") {
+		t.Errorf("no image should have been embedded: %s", out)
+	}
+	if !strings.Contains(out, "bad.webp") || !strings.Contains(out, "bad.png") {
+		t.Errorf("original <img> tags should be left intact: %s", out)
+	}
+}
+
 func TestDownloadAndEmbedImagesErrorPaths(t *testing.T) {
 	html := `<img src="http://127.0.0.1:0/dead.jpg">`
 	out, images := downloadAndEmbedImages(html)

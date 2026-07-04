@@ -155,6 +155,28 @@ func TestSignupSigninRateLimitMiddleware(t *testing.T) {
 	}
 }
 
+func TestSignupRateLimitMiddlewareBlocks(t *testing.T) {
+	resetDB(t)
+	origMax := app.signupRlMax
+	app.signupRlMax = 1
+	defer func() { app.signupRlMax = origMax }()
+
+	h := app.signupRateLimitMiddleware(okHandler())
+	do := func() int {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/signup", nil)
+		req.RemoteAddr = "10.0.0.8:1"
+		h.ServeHTTP(w, req)
+		return w.Code
+	}
+	if code := do(); code != http.StatusOK {
+		t.Fatalf("first signup = %d", code)
+	}
+	if code := do(); code != http.StatusTooManyRequests {
+		t.Errorf("over-limit signup = %d, want 429", code)
+	}
+}
+
 func TestSigninRateLimitMiddlewareBlocks(t *testing.T) {
 	resetDB(t)
 	origMax := app.signinRlMax
