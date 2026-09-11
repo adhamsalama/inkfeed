@@ -17,12 +17,12 @@ DELETE FROM sessions WHERE token = ?;
 SELECT * FROM users WHERE id = ? LIMIT 1;
 
 -- name: GetUserPreferences :one
-SELECT font_size, letter_spacing, line_height, cors_proxy_url, epub_embed_images, mobi_embed_images, email_to, font_family, bold_text, dark_mode
+SELECT font_size, letter_spacing, line_height, cors_proxy_url, epub_embed_images, mobi_embed_images, email_to, font_family, bold_text, dark_mode, group_sort_by_date
 FROM user_preferences WHERE user_id = ? LIMIT 1;
 
 -- name: UpsertUserPreferences :exec
-INSERT INTO user_preferences (user_id, font_size, letter_spacing, line_height, cors_proxy_url, epub_embed_images, mobi_embed_images, email_to, font_family, bold_text, dark_mode, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+INSERT INTO user_preferences (user_id, font_size, letter_spacing, line_height, cors_proxy_url, epub_embed_images, mobi_embed_images, email_to, font_family, bold_text, dark_mode, group_sort_by_date, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 ON CONFLICT(user_id) DO UPDATE SET
     font_size = excluded.font_size,
     letter_spacing = excluded.letter_spacing,
@@ -34,6 +34,7 @@ ON CONFLICT(user_id) DO UPDATE SET
     font_family = excluded.font_family,
     bold_text = excluded.bold_text,
     dark_mode = excluded.dark_mode,
+    group_sort_by_date = excluded.group_sort_by_date,
     updated_at = CURRENT_TIMESTAMP;
 
 -- name: GetUserSavedFeeds :many

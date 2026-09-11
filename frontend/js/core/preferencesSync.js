@@ -55,6 +55,8 @@ var PreferencesSync = {
             localStorage.setItem("epubEmbedImages", prefs.epubEmbedImages ? "true" : "false");
             AppConfig.MOBI_EMBED_IMAGES = prefs.mobiEmbedImages;
             localStorage.setItem("mobiEmbedImages", prefs.mobiEmbedImages ? "true" : "false");
+            AppConfig.GROUP_SORT_BY_DATE = prefs.groupSortByDate;
+            localStorage.setItem("groupSortByDate", prefs.groupSortByDate ? "true" : "false");
             if (prefs.emailTo) {
                 localStorage.setItem("emailTo", prefs.emailTo);
             }
@@ -97,6 +99,7 @@ var PreferencesSync = {
             corsProxyUrl: AppConfig.CORS_PROXY_URL,
             epubEmbedImages: AppConfig.EPUB_EMBED_IMAGES,
             mobiEmbedImages: AppConfig.MOBI_EMBED_IMAGES,
+            groupSortByDate: AppConfig.GROUP_SORT_BY_DATE,
             emailTo: localStorage.getItem("emailTo") || "",
             fontFamily: AppState.currentFontFamily || "",
             boldText: AppState.boldText || false,
@@ -156,6 +159,8 @@ var PreferencesSync = {
         if (embedImages !== null) { AppConfig.EPUB_EMBED_IMAGES = embedImages !== "false"; }
         var mobiEmbedImages = localStorage.getItem("mobiEmbedImages");
         if (mobiEmbedImages !== null) { AppConfig.MOBI_EMBED_IMAGES = mobiEmbedImages !== "false"; }
+        var groupSortByDate = localStorage.getItem("groupSortByDate");
+        if (groupSortByDate !== null) { AppConfig.GROUP_SORT_BY_DATE = groupSortByDate !== "false"; }
         applyContentStyles();
         FeedRenderer.renderSavedFeeds();
     }

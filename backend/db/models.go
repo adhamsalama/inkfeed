@@ -92,6 +92,7 @@ type UserPreference struct {
 	FontFamily      sql.NullString
 	BoldText        sql.NullInt64
 	DarkMode        sql.NullInt64
+	GroupSortByDate int64
 	UpdatedAt       time.Time
 }
 
