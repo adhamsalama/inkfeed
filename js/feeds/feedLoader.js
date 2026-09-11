@@ -314,6 +314,13 @@ function loadFeed() {
     }
 }
 
+// Milliseconds since epoch for an article's pubDate; 0 when missing or unparseable.
+function articleTimestamp(article) {
+    if (!article.pubDate) { return 0; }
+    var t = new Date(article.pubDate).getTime();
+    return isNaN(t) ? 0 : t;
+}
+
 function loadCategoryFeeds(categoryFeeds, categoryName) {
     var total = categoryFeeds.length;
     var completed = 0;
@@ -349,6 +356,15 @@ function loadCategoryFeeds(categoryFeeds, categoryName) {
                 ViewManager.showInputView();
                 ViewManager.showError("input-error", "No articles found in category feeds");
                 return;
+            }
+            if (AppConfig.GROUP_SORT_BY_DATE) {
+                allArticles.sort(function(a, b) {
+                    return articleTimestamp(b) - articleTimestamp(a);
+                });
+                // Feed name moves into the title since there are no per-feed sections.
+                for (var m = 0; m < allArticles.length; m++) {
+                    allArticles[m].feedPrefix = allArticles[m].feedTitle || "";
+                }
             }
             for (var k = 0; k < allArticles.length; k++) {
                 allArticles[k].index = k;

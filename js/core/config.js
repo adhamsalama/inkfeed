@@ -35,6 +35,9 @@ var AppConfig = {
 
     // MOBI options
     MOBI_EMBED_IMAGES: true,
+
+    // Sort multi-feed (group) views by publication date instead of feed order
+    GROUP_SORT_BY_DATE: true,
 };
 
 (function() {
@@ -53,5 +56,9 @@ var AppConfig = {
     var mobiEmbedImages = localStorage.getItem("mobiEmbedImages");
     if (mobiEmbedImages !== null) {
         AppConfig.MOBI_EMBED_IMAGES = mobiEmbedImages !== "false";
+    }
+    var groupSortByDate = localStorage.getItem("groupSortByDate");
+    if (groupSortByDate !== null) {
+        AppConfig.GROUP_SORT_BY_DATE = groupSortByDate !== "false";
     }
 })();
