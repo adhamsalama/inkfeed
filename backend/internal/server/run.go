@@ -150,6 +150,8 @@ func setupDB(path string) (*sql.DB, error) {
 	migrate(`ALTER TABLE user_preferences ADD COLUMN font_family TEXT`)
 	migrate(`ALTER TABLE user_preferences ADD COLUMN bold_text INTEGER`)
 	migrate(`ALTER TABLE user_preferences ADD COLUMN dark_mode INTEGER`)
+	// Defaults to 1 so existing users get date-sorted feed groups too.
+	migrate(`ALTER TABLE user_preferences ADD COLUMN group_sort_by_date INTEGER NOT NULL DEFAULT 1`)
 	migrate(`CREATE TABLE IF NOT EXISTS ip_rate_limits (ip TEXT NOT NULL, endpoint TEXT NOT NULL, count INTEGER NOT NULL DEFAULT 0, window_start DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, blocked_until DATETIME, PRIMARY KEY (ip, endpoint))`)
 	sqlDB.Exec(`CREATE TABLE IF NOT EXISTS feed_items (
 		id             INTEGER  PRIMARY KEY AUTOINCREMENT,

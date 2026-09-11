@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS user_preferences (
     font_family       TEXT,
     bold_text         INTEGER,
     dark_mode         INTEGER,
+    group_sort_by_date INTEGER NOT NULL DEFAULT 1,
     updated_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 

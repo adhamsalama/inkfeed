@@ -44,12 +44,12 @@ func TestPreferencesHandlerRoundTrip(t *testing.T) {
 	}
 	var resp preferencesResponse
 	json.Unmarshal(w.Body.Bytes(), &resp)
-	if resp.Email != "prefs@y.com" || !resp.EpubEmbedImages || !resp.MobiEmbedImages {
+	if resp.Email != "prefs@y.com" || !resp.EpubEmbedImages || !resp.MobiEmbedImages || !resp.GroupSortByDate {
 		t.Errorf("default prefs wrong: %+v", resp)
 	}
 
 	// PUT preferences
-	body := `{"fontSize":1.5,"letterSpacing":0.2,"lineHeight":1.6,"corsProxyUrl":"http://p","epubEmbedImages":false,"mobiEmbedImages":true,"emailTo":"k@x.com","fontFamily":"serif","boldText":true,"darkMode":true}`
+	body := `{"fontSize":1.5,"letterSpacing":0.2,"lineHeight":1.6,"corsProxyUrl":"http://p","epubEmbedImages":false,"mobiEmbedImages":true,"emailTo":"k@x.com","fontFamily":"serif","boldText":true,"darkMode":true,"groupSortByDate":false}`
 	w = httptest.NewRecorder()
 	app.preferencesHandler(w, putJSON("/preferences", body, uid))
 	if w.Code != http.StatusNoContent {
@@ -60,8 +60,21 @@ func TestPreferencesHandlerRoundTrip(t *testing.T) {
 	w = httptest.NewRecorder()
 	app.preferencesHandler(w, httptest.NewRequest(http.MethodGet, "/preferences", nil).WithContext(userContext(uid)))
 	json.Unmarshal(w.Body.Bytes(), &resp)
-	if resp.FontSize != 1.5 || resp.EmailTo != "k@x.com" || resp.EpubEmbedImages || !resp.DarkMode {
+	if resp.FontSize != 1.5 || resp.EmailTo != "k@x.com" || resp.EpubEmbedImages || !resp.DarkMode || resp.GroupSortByDate {
 		t.Errorf("saved prefs wrong: %+v", resp)
+	}
+
+	// Turning group date-sorting back on persists too
+	w = httptest.NewRecorder()
+	app.preferencesHandler(w, putJSON("/preferences", `{"groupSortByDate":true}`, uid))
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("PUT groupSortByDate = %d", w.Code)
+	}
+	w = httptest.NewRecorder()
+	app.preferencesHandler(w, httptest.NewRequest(http.MethodGet, "/preferences", nil).WithContext(userContext(uid)))
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if !resp.GroupSortByDate {
+		t.Errorf("groupSortByDate not persisted: %+v", resp)
 	}
 
 	// PUT bad JSON

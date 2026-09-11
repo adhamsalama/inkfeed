@@ -120,6 +120,12 @@ function toggleMobiEmbedImages() {
     PreferencesSync.pushPrefs();
 }
 
+function toggleGroupSortByDate() {
+    AppConfig.GROUP_SORT_BY_DATE = document.getElementById("group-sort-by-date-checkbox").checked;
+    localStorage.setItem("groupSortByDate", AppConfig.GROUP_SORT_BY_DATE ? "true" : "false");
+    PreferencesSync.pushPrefs();
+}
+
 function applyBoldText() {
     if (AppState.boldText) {
         addClass(document.body, "bold-text");
@@ -165,6 +171,7 @@ function openSettings(section) {
     document.getElementById("email-to-input").value = localStorage.getItem("emailTo") || "";
     document.getElementById("epub-embed-images-checkbox").checked = AppConfig.EPUB_EMBED_IMAGES;
     document.getElementById("mobi-embed-images-checkbox").checked = AppConfig.MOBI_EMBED_IMAGES;
+    document.getElementById("group-sort-by-date-checkbox").checked = AppConfig.GROUP_SORT_BY_DATE;
     document.getElementById("settings-modal").classList.remove("hidden");
     var boldBtn = document.getElementById("bold-toggle-btn");
     if (boldBtn) {

@@ -29,6 +29,7 @@ type preferencesRequest struct {
 	FontFamily      string  `json:"fontFamily"`
 	BoldText        bool    `json:"boldText"`
 	DarkMode        bool    `json:"darkMode"`
+	GroupSortByDate bool    `json:"groupSortByDate"`
 }
 
 type savedFeedItem struct {
@@ -67,6 +68,7 @@ type preferencesResponse struct {
 	FontFamily      string          `json:"fontFamily"`
 	BoldText        bool            `json:"boldText"`
 	DarkMode        bool            `json:"darkMode"`
+	GroupSortByDate bool            `json:"groupSortByDate"`
 	SavedFeeds      []savedFeedItem `json:"savedFeeds"`
 	FeedGroups      []feedGroupData `json:"feedGroups"`
 	Favorites       []favoriteItem  `json:"favorites"`
@@ -96,6 +98,8 @@ func (a *App) getPreferencesHandler(w http.ResponseWriter, r *http.Request, user
 		jsonError(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+	// No preferences row yet — fall back to the column default (sort on).
+	hasPrefs := err == nil
 
 	feeds, err := a.q.GetUserSavedFeeds(r.Context(), userID)
 	if err != nil {
@@ -139,10 +143,14 @@ func (a *App) getPreferencesHandler(w http.ResponseWriter, r *http.Request, user
 	}
 
 	resp := preferencesResponse{
-		Email:      user.Email,
-		SavedFeeds: feedItems,
-		FeedGroups: groupDataList,
-		Favorites:  favItems,
+		Email:           user.Email,
+		SavedFeeds:      feedItems,
+		FeedGroups:      groupDataList,
+		Favorites:       favItems,
+		GroupSortByDate: true,
+	}
+	if hasPrefs {
+		resp.GroupSortByDate = prefs.GroupSortByDate != 0
 	}
 	if prefs.FontSize.Valid {
 		resp.FontSize = prefs.FontSize.Float64
@@ -221,6 +229,12 @@ func (a *App) putPreferencesHandler(w http.ResponseWriter, r *http.Request, user
 			}
 			return 0
 		}(), Valid: true},
+		GroupSortByDate: func() int64 {
+			if req.GroupSortByDate {
+				return 1
+			}
+			return 0
+		}(),
 	})
 	if err != nil {
 		jsonError(w, "internal error", http.StatusInternalServerError)

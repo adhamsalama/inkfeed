@@ -359,7 +359,7 @@ var FeedRenderer = {
             for (var i = 0; i < articles.length; i++) {
                 var article = articles[i];
 
-                if (article.feedTitle && article.feedTitle !== lastFeedTitle) {
+                if (!article.feedPrefix && article.feedTitle && article.feedTitle !== lastFeedTitle) {
                     var separator = document.createElement("li");
                     separator.className = "feed-separator";
                     setText(separator, article.feedTitle);
@@ -383,7 +383,7 @@ var FeedRenderer = {
 
                 var title = document.createElement("span");
                 title.className = "article-title";
-                setText(title, article.title);
+                setText(title, article.feedPrefix ? article.feedPrefix + " \u2014 " + article.title : article.title);
 
                 titleRow.appendChild(title);
 
