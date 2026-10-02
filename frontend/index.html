@@ -99,13 +99,13 @@
             <hr />
             <div id="feed-loading" class="loading hidden">Loading feed...</div>
             <div id="download-all-progress" class="loading hidden">Downloading articles...</div>
+            <div id="archive-search-row" class="proxy-input-row hidden">
+                <input type="text" id="archive-search-input" placeholder="Search archive..." />
+                <button onclick="searchFeedArchive()">Search</button>
+                <button id="archive-search-clear" class="secondary hidden" onclick="clearFeedArchiveSearch()">Clear</button>
+            </div>
             <ul id="article-list" class="article-list"></ul>
             <div id="feed-archive-section" class="hidden">
-                <div class="proxy-input-row">
-                    <input type="text" id="archive-search-input" placeholder="Search archive..." />
-                    <button onclick="searchFeedArchive()">Search</button>
-                    <button id="archive-search-clear" class="secondary hidden" onclick="clearFeedArchiveSearch()">Clear</button>
-                </div>
                 <div id="archive-loading" class="loading hidden">Loading archived articles...</div>
                 <div id="archive-empty" class="loading hidden">No matching articles.</div>
                 <ul id="archive-article-list" class="article-list"></ul>

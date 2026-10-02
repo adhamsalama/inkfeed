@@ -135,6 +135,7 @@
         loadGroup: function(feeds, name) {
             deactivateToggle("groups-section", "groups-toggle-btn");
             loadCategoryFeeds(feeds, name);
+            setArchiveSearchFeeds(feeds);
         },
 
         toggleFeedGroups: function() {

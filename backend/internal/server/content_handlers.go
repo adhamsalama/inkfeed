@@ -6,7 +6,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/adhamsalama/inkfeed-backend/db"
 	"github.com/adhamsalama/inkfeed-backend/internal/content"
 	"github.com/adhamsalama/inkfeed-backend/internal/export"
 )
@@ -132,24 +131,45 @@ func (a *App) feedArchiveHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(page)
 }
 
-// feedArchiveSearchHandler full-text searches a feed's archived articles. Only
-// users who have saved the feed may search it.
+// maxSearchFeeds caps how many feeds one search request may span.
+const maxSearchFeeds = 200
+
+// feedArchiveSearchHandler full-text searches the archived articles of one or
+// more feeds (repeated url params, e.g. a feed group). Every feed must be in the
+// user's saved feeds or feed groups.
 func (a *App) feedArchiveSearchHandler(w http.ResponseWriter, r *http.Request) {
-	feedURL := r.URL.Query().Get("url")
 	query := strings.TrimSpace(r.URL.Query().Get("q"))
-	if feedURL == "" || query == "" {
+	var feedURLs []string
+	seen := make(map[string]bool)
+	for _, u := range r.URL.Query()["url"] {
+		if u != "" && !seen[u] {
+			seen[u] = true
+			feedURLs = append(feedURLs, u)
+		}
+	}
+	if len(feedURLs) == 0 || query == "" {
 		jsonError(w, "url and q parameters required", http.StatusBadRequest)
 		return
 	}
+	if len(feedURLs) > maxSearchFeeds {
+		jsonError(w, "too many feeds", http.StatusBadRequest)
+		return
+	}
 	userID := r.Context().Value(contextKey("userID")).(int64)
-	saved, err := a.q.UserHasSavedFeed(r.Context(), db.UserHasSavedFeedParams{UserID: userID, Url: feedURL})
+	allowed, err := a.q.GetUserSearchableFeedURLs(r.Context(), userID)
 	if err != nil {
 		jsonError(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	if !saved {
-		jsonError(w, "feed is not in your saved feeds", http.StatusForbidden)
-		return
+	allowedSet := make(map[string]bool, len(allowed))
+	for _, u := range allowed {
+		allowedSet[u] = true
+	}
+	for _, u := range feedURLs {
+		if !allowedSet[u] {
+			jsonError(w, "feed is not in your saved feeds or groups", http.StatusForbidden)
+			return
+		}
 	}
 	limit := int64(20)
 	if v, err := strconv.ParseInt(r.URL.Query().Get("limit"), 10, 64); err == nil && v > 0 && v <= 100 {
@@ -159,7 +179,7 @@ func (a *App) feedArchiveSearchHandler(w http.ResponseWriter, r *http.Request) {
 	if v, err := strconv.ParseInt(r.URL.Query().Get("offset"), 10, 64); err == nil && v >= 0 {
 		offset = v
 	}
-	page, err := a.content.SearchFeedArchive(feedURL, query, limit, offset)
+	page, err := a.content.SearchFeedArchive(feedURLs, query, limit, offset)
 	if err != nil {
 		jsonError(w, "failed to search archive", http.StatusInternalServerError)
 		return

@@ -276,4 +276,36 @@ func TestFeedArchiveSearchHandler(t *testing.T) {
 		!strings.Contains(page.Articles[0].Description, "lighthouses") {
 		t.Errorf("search page = %+v", page)
 	}
+
+	// Feeds in the user's groups are searchable alongside saved feeds.
+	gid, err := app.q.InsertFeedGroup(ctx, db.InsertFeedGroupParams{UserID: uid, Name: "G", Position: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	app.q.InsertFeedGroupItem(ctx, db.InsertFeedGroupItemParams{GroupID: gid, Url: "feedG", Title: "G feed"})
+	app.q.InsertFeedItem(ctx, db.InsertFeedItemParams{FeedUrl: "feedG", ItemUrl: "https://g/1", Title: "Grouped"})
+	app.content.ArchiveArticle("https://g/1", "Grouped", "", "", "", "", "more lighthouses here")
+	w = call(uid, "url=feedS&url=feedG&url=feedS&q=lighthouse")
+	if w.Code != http.StatusOK {
+		t.Fatalf("group search = %d %s", w.Code, w.Body.String())
+	}
+	var multi struct {
+		Total    int `json:"total"`
+		Articles []struct {
+			FeedURL string `json:"feedUrl"`
+		} `json:"articles"`
+	}
+	mustJSON(t, w, &multi)
+	if multi.Total != 2 || len(multi.Articles) != 2 {
+		t.Errorf("group search page = %+v", multi)
+	}
+
+	// One unauthorized feed rejects the whole request.
+	if w := call(uid, "url=feedS&url=feedNotMine&q=lighthouse"); w.Code != http.StatusForbidden {
+		t.Errorf("mixed authorization = %d", w.Code)
+	}
+	// Another user's group doesn't grant access.
+	if w := call(other, "url=feedG&q=lighthouse"); w.Code != http.StatusForbidden {
+		t.Errorf("other user's group = %d", w.Code)
+	}
 }

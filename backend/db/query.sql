@@ -136,15 +136,19 @@ SELECT key, title FROM article_archive ORDER BY archived_at ASC LIMIT 1;
 DELETE FROM article_archive
 WHERE key = (SELECT key FROM article_archive ORDER BY archived_at ASC LIMIT 1);
 
--- name: UserHasSavedFeed :one
-SELECT EXISTS (SELECT 1 FROM user_saved_feeds WHERE user_id = ? AND url = ?);
+-- name: GetUserSearchableFeedURLs :many
+SELECT sf.url FROM user_saved_feeds sf WHERE sf.user_id = sqlc.arg(user_id)
+UNION
+SELECT gi.url FROM user_feed_group_items gi
+JOIN user_feed_groups g ON g.id = gi.group_id
+WHERE g.user_id = sqlc.arg(user_id);
 
 -- name: SearchFeedArchive :many
-SELECT fi.item_url, fi.title, fi.description, fi.pub_date, fi.comments_url, a.text_content
+SELECT fi.feed_url, fi.item_url, fi.title, fi.description, fi.pub_date, fi.comments_url, a.text_content
 FROM article_fts
 JOIN article_archive a ON a.rowid = article_fts.rowid
 JOIN feed_items fi ON fi.item_url = a.key
-WHERE article_fts.doc MATCH ? AND fi.feed_url = ?
+WHERE article_fts.doc MATCH ? AND fi.feed_url IN (sqlc.slice('feed_urls'))
 ORDER BY article_fts.rank
 LIMIT ? OFFSET ?;
 
@@ -153,4 +157,4 @@ SELECT COUNT(*)
 FROM article_fts
 JOIN article_archive a ON a.rowid = article_fts.rowid
 JOIN feed_items fi ON fi.item_url = a.key
-WHERE article_fts.doc MATCH ? AND fi.feed_url = ?;
+WHERE article_fts.doc MATCH ? AND fi.feed_url IN (sqlc.slice('feed_urls'));

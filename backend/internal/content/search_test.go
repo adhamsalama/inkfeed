@@ -61,7 +61,7 @@ func TestSearchFeedArchive(t *testing.T) {
 	seed("feedA", "https://a/2", "Crabs", "Rust has ownership & <borrowing>.")
 	seed("feedB", "https://b/1", "Other goroutines", "Goroutines elsewhere.")
 
-	page, err := svc.SearchFeedArchive("feedA", "goroutine", 10, 0)
+	page, err := svc.SearchFeedArchive([]string{"feedA"}, "goroutine", 10, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,44 +73,44 @@ func TestSearchFeedArchive(t *testing.T) {
 	}
 
 	// Title is indexed too; snippet falls back to the feed description.
-	page, _ = svc.SearchFeedArchive("feedA", "crabs", 10, 0)
+	page, _ = svc.SearchFeedArchive([]string{"feedA"}, "crabs", 10, 0)
 	if len(page.Articles) != 1 || page.Articles[0].Description == "" {
 		t.Errorf("title search = %+v", page)
 	}
 
 	// Snippets are HTML-escaped.
-	page, _ = svc.SearchFeedArchive("feedA", "borrowing", 10, 0)
+	page, _ = svc.SearchFeedArchive([]string{"feedA"}, "borrowing", 10, 0)
 	if len(page.Articles) != 1 || !strings.Contains(page.Articles[0].Description, "&lt;borrowing&gt;") {
 		t.Errorf("escaped snippet = %+v", page)
 	}
 
 	// All terms must match.
-	page, _ = svc.SearchFeedArchive("feedA", "rust goroutines", 10, 0)
+	page, _ = svc.SearchFeedArchive([]string{"feedA"}, "rust goroutines", 10, 0)
 	if len(page.Articles) != 0 {
 		t.Errorf("AND search = %+v", page)
 	}
 
 	// FTS5 syntax in user input is harmless.
-	if _, err := svc.SearchFeedArchive("feedA", `"unbalanced ( NOT * :`, 10, 0); err != nil {
+	if _, err := svc.SearchFeedArchive([]string{"feedA"}, `"unbalanced ( NOT * :`, 10, 0); err != nil {
 		t.Errorf("operator input errored: %v", err)
 	}
-	page, err = svc.SearchFeedArchive("feedA", `"" `, 10, 0)
+	page, err = svc.SearchFeedArchive([]string{"feedA"}, `"" `, 10, 0)
 	if err != nil || len(page.Articles) != 0 || page.Articles == nil {
 		t.Errorf("empty query = %+v, %v", page, err)
 	}
 
 	// Re-archiving replaces the indexed text; deleting removes it.
 	svc.ArchiveArticle("https://a/1", "Gophers", "", "", "", "", "Now about generics only.")
-	if page, _ = svc.SearchFeedArchive("feedA", "channels", 10, 0); len(page.Articles) != 0 {
+	if page, _ = svc.SearchFeedArchive([]string{"feedA"}, "channels", 10, 0); len(page.Articles) != 0 {
 		t.Errorf("stale index after update = %+v", page)
 	}
-	if page, _ = svc.SearchFeedArchive("feedA", "generics", 10, 0); len(page.Articles) != 1 {
+	if page, _ = svc.SearchFeedArchive([]string{"feedA"}, "generics", 10, 0); len(page.Articles) != 1 {
 		t.Errorf("updated text not indexed = %+v", page)
 	}
 	if _, err := testDB.Exec(`DELETE FROM article_archive WHERE key = 'https://a/1'`); err != nil {
 		t.Fatal(err)
 	}
-	if page, _ = svc.SearchFeedArchive("feedA", "generics", 10, 0); len(page.Articles) != 0 {
+	if page, _ = svc.SearchFeedArchive([]string{"feedA"}, "generics", 10, 0); len(page.Articles) != 0 {
 		t.Errorf("stale index after delete = %+v", page)
 	}
 }
@@ -122,12 +122,33 @@ func TestSearchFeedArchivePagination(t *testing.T) {
 		svc.q.InsertFeedItem(ctx, db.InsertFeedItemParams{FeedUrl: "feedP", ItemUrl: u, Title: "kindle " + u})
 		svc.ArchiveArticle(u, "kindle "+u, "", "", "", "", "e-ink reading")
 	}
-	page, err := svc.SearchFeedArchive("feedP", "kindle", 2, 0)
+	page, err := svc.SearchFeedArchive([]string{"feedP"}, "kindle", 2, 0)
 	if err != nil || page.Total != 3 || len(page.Articles) != 2 || !page.HasMore {
 		t.Fatalf("page 1 = %+v, %v", page, err)
 	}
-	page, _ = svc.SearchFeedArchive("feedP", "kindle", 2, 2)
+	page, _ = svc.SearchFeedArchive([]string{"feedP"}, "kindle", 2, 2)
 	if len(page.Articles) != 1 || page.HasMore || page.Articles[0].Index != 2 {
 		t.Errorf("page 2 = %+v", page)
+	}
+}
+
+func TestSearchFeedArchiveMultipleFeeds(t *testing.T) {
+	resetDB(t)
+	ctx := context.Background()
+	for _, it := range []struct{ feed, url string }{{"feedM1", "https://m/1"}, {"feedM2", "https://m/2"}, {"feedM3", "https://m/3"}} {
+		svc.q.InsertFeedItem(ctx, db.InsertFeedItemParams{FeedUrl: it.feed, ItemUrl: it.url, Title: it.url})
+		svc.ArchiveArticle(it.url, it.url, "", "", "", "", "shared keyword walrus")
+	}
+	page, err := svc.SearchFeedArchive([]string{"feedM1", "feedM2"}, "walrus", 10, 0)
+	if err != nil || page.Total != 2 || len(page.Articles) != 2 {
+		t.Fatalf("multi-feed = %+v, %v", page, err)
+	}
+	for _, a := range page.Articles {
+		if a.FeedURL != "feedM1" && a.FeedURL != "feedM2" {
+			t.Errorf("unexpected feed %q", a.FeedURL)
+		}
+	}
+	if page, _ = svc.SearchFeedArchive(nil, "walrus", 10, 0); len(page.Articles) != 0 {
+		t.Errorf("no feeds = %+v", page)
 	}
 }

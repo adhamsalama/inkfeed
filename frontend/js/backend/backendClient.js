@@ -87,8 +87,12 @@ var BackendClient = {
         BackendClient._get("/feed-archive?url=" + encodeURIComponent(feedUrl) + "&limit=" + limit + "&offset=" + offset, callback);
     },
 
-    searchFeedArchive: function(feedUrl, query, limit, offset, callback) {
-        BackendClient._get("/feed-archive/search?url=" + encodeURIComponent(feedUrl) + "&q=" + encodeURIComponent(query) + "&limit=" + limit + "&offset=" + offset, callback);
+    searchFeedArchive: function(feedUrls, query, limit, offset, callback) {
+        var params = "";
+        for (var i = 0; i < feedUrls.length; i++) {
+            params += "url=" + encodeURIComponent(feedUrls[i]) + "&";
+        }
+        BackendClient._get("/feed-archive/search?" + params + "q=" + encodeURIComponent(query) + "&limit=" + limit + "&offset=" + offset, callback);
     },
 
     fetchRedditPost: function(redditJsonUrl, callback) {

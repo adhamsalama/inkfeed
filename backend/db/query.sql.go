@@ -8,6 +8,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"time"
 )
 
@@ -27,16 +28,27 @@ SELECT COUNT(*)
 FROM article_fts
 JOIN article_archive a ON a.rowid = article_fts.rowid
 JOIN feed_items fi ON fi.item_url = a.key
-WHERE article_fts.doc MATCH ? AND fi.feed_url = ?
+WHERE article_fts.doc MATCH ? AND fi.feed_url IN (/*SLICE:feed_urls*/?)
 `
 
 type CountSearchFeedArchiveParams struct {
-	Doc     string
-	FeedUrl string
+	Doc      string
+	FeedUrls []string
 }
 
 func (q *Queries) CountSearchFeedArchive(ctx context.Context, arg CountSearchFeedArchiveParams) (int64, error) {
-	row := q.db.QueryRowContext(ctx, countSearchFeedArchive, arg.Doc, arg.FeedUrl)
+	query := countSearchFeedArchive
+	var queryParams []interface{}
+	queryParams = append(queryParams, arg.Doc)
+	if len(arg.FeedUrls) > 0 {
+		for _, v := range arg.FeedUrls {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:feed_urls*/?", strings.Repeat(",?", len(arg.FeedUrls))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:feed_urls*/?", "NULL", 1)
+	}
+	row := q.db.QueryRowContext(ctx, query, queryParams...)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -530,6 +542,37 @@ func (q *Queries) GetUserSavedFeeds(ctx context.Context, userID int64) ([]GetUse
 	return items, nil
 }
 
+const getUserSearchableFeedURLs = `-- name: GetUserSearchableFeedURLs :many
+SELECT sf.url FROM user_saved_feeds sf WHERE sf.user_id = ?1
+UNION
+SELECT gi.url FROM user_feed_group_items gi
+JOIN user_feed_groups g ON g.id = gi.group_id
+WHERE g.user_id = ?1
+`
+
+func (q *Queries) GetUserSearchableFeedURLs(ctx context.Context, userID int64) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, getUserSearchableFeedURLs, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var url string
+		if err := rows.Scan(&url); err != nil {
+			return nil, err
+		}
+		items = append(items, url)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const insertFeedGroup = `-- name: InsertFeedGroup :one
 INSERT INTO user_feed_groups (user_id, name, position) VALUES (?, ?, ?) RETURNING id
 `
@@ -651,23 +694,24 @@ func (q *Queries) MarkFeedItemArchiveFailed(ctx context.Context, itemUrl string)
 }
 
 const searchFeedArchive = `-- name: SearchFeedArchive :many
-SELECT fi.item_url, fi.title, fi.description, fi.pub_date, fi.comments_url, a.text_content
+SELECT fi.feed_url, fi.item_url, fi.title, fi.description, fi.pub_date, fi.comments_url, a.text_content
 FROM article_fts
 JOIN article_archive a ON a.rowid = article_fts.rowid
 JOIN feed_items fi ON fi.item_url = a.key
-WHERE article_fts.doc MATCH ? AND fi.feed_url = ?
+WHERE article_fts.doc MATCH ? AND fi.feed_url IN (/*SLICE:feed_urls*/?)
 ORDER BY article_fts.rank
 LIMIT ? OFFSET ?
 `
 
 type SearchFeedArchiveParams struct {
-	Doc     string
-	FeedUrl string
-	Limit   int64
-	Offset  int64
+	Doc      string
+	FeedUrls []string
+	Limit    int64
+	Offset   int64
 }
 
 type SearchFeedArchiveRow struct {
+	FeedUrl     string
 	ItemUrl     string
 	Title       string
 	Description string
@@ -677,12 +721,20 @@ type SearchFeedArchiveRow struct {
 }
 
 func (q *Queries) SearchFeedArchive(ctx context.Context, arg SearchFeedArchiveParams) ([]SearchFeedArchiveRow, error) {
-	rows, err := q.db.QueryContext(ctx, searchFeedArchive,
-		arg.Doc,
-		arg.FeedUrl,
-		arg.Limit,
-		arg.Offset,
-	)
+	query := searchFeedArchive
+	var queryParams []interface{}
+	queryParams = append(queryParams, arg.Doc)
+	if len(arg.FeedUrls) > 0 {
+		for _, v := range arg.FeedUrls {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:feed_urls*/?", strings.Repeat(",?", len(arg.FeedUrls))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:feed_urls*/?", "NULL", 1)
+	}
+	queryParams = append(queryParams, arg.Limit)
+	queryParams = append(queryParams, arg.Offset)
+	rows, err := q.db.QueryContext(ctx, query, queryParams...)
 	if err != nil {
 		return nil, err
 	}
@@ -691,6 +743,7 @@ func (q *Queries) SearchFeedArchive(ctx context.Context, arg SearchFeedArchivePa
 	for rows.Next() {
 		var i SearchFeedArchiveRow
 		if err := rows.Scan(
+			&i.FeedUrl,
 			&i.ItemUrl,
 			&i.Title,
 			&i.Description,
@@ -830,20 +883,4 @@ func (q *Queries) UpsertUserPreferences(ctx context.Context, arg UpsertUserPrefe
 		arg.GroupSortByDate,
 	)
 	return err
-}
-
-const userHasSavedFeed = `-- name: UserHasSavedFeed :one
-SELECT EXISTS (SELECT 1 FROM user_saved_feeds WHERE user_id = ? AND url = ?)
-`
-
-type UserHasSavedFeedParams struct {
-	UserID int64
-	Url    string
-}
-
-func (q *Queries) UserHasSavedFeed(ctx context.Context, arg UserHasSavedFeedParams) (bool, error) {
-	row := q.db.QueryRowContext(ctx, userHasSavedFeed, arg.UserID, arg.Url)
-	var exists bool
-	err := row.Scan(&exists)
-	return exists, err
 }
