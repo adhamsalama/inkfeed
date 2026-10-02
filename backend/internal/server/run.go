@@ -165,7 +165,51 @@ func setupDB(path string) (*sql.DB, error) {
 		UNIQUE(feed_url, item_url)
 	)`)
 
+	if err := setupArticleSearch(sqlDB); err != nil {
+		return nil, err
+	}
+
 	return sqlDB, nil
+}
+
+// articleSearchSchema mirrors the article_fts table and its sync triggers in
+// db/schema.sql.
+const articleSearchSchema = `
+	CREATE VIRTUAL TABLE IF NOT EXISTS article_fts USING fts5(
+		doc,
+		content='',
+		contentless_delete=1,
+		tokenize='porter unicode61 remove_diacritics 2'
+	);
+	CREATE TRIGGER IF NOT EXISTS article_archive_fts_ai AFTER INSERT ON article_archive BEGIN
+		INSERT INTO article_fts (rowid, doc) VALUES (new.rowid, new.title || ' ' || new.text_content);
+	END;
+	CREATE TRIGGER IF NOT EXISTS article_archive_fts_ad AFTER DELETE ON article_archive BEGIN
+		DELETE FROM article_fts WHERE rowid = old.rowid;
+	END;
+	CREATE TRIGGER IF NOT EXISTS article_archive_fts_au AFTER UPDATE OF title, text_content ON article_archive BEGIN
+		DELETE FROM article_fts WHERE rowid = old.rowid;
+		INSERT INTO article_fts (rowid, doc) VALUES (new.rowid, new.title || ' ' || new.text_content);
+	END;`
+
+// setupArticleSearch creates the full-text index over article_archive and, the
+// first time it is created, indexes the articles that were archived before.
+// The index is keyed by article_archive's implicit rowid, so never VACUUM the
+// database (it may renumber those rowids) without rebuilding article_fts.
+func setupArticleSearch(sqlDB *sql.DB) error {
+	var exists int
+	if err := sqlDB.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE name = 'article_fts'`).Scan(&exists); err != nil {
+		return err
+	}
+	if _, err := sqlDB.Exec(articleSearchSchema); err != nil {
+		return err
+	}
+	if exists == 0 {
+		if _, err := sqlDB.Exec(`INSERT INTO article_fts (rowid, doc) SELECT rowid, title || ' ' || text_content FROM article_archive`); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // startBackgroundJobs launches the periodic goroutines (feed scraping, content
@@ -203,6 +247,7 @@ func (a *App) newServeMux() *http.ServeMux {
 	mux.Handle("/decode-google-news", protected(a.decodeGoogleNewsHandler))
 	mux.Handle("/email", a.corsMiddleware(a.authMiddleware(a.emailRateLimitMiddleware(http.HandlerFunc(a.emailHandler)))))
 	mux.Handle("/feed-archive", protected(a.feedArchiveHandler))
+	mux.Handle("/feed-archive/search", protected(a.feedArchiveSearchHandler))
 
 	return mux
 }

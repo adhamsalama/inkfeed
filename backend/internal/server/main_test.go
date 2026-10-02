@@ -123,6 +123,40 @@ func TestSetupDB(t *testing.T) {
 	}
 }
 
+// TestSetupDBBackfillsSearchIndex checks that articles archived before the
+// search index existed are indexed when it is first created.
+func TestSetupDBBackfillsSearchIndex(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "backfill.db")
+	sqlDB, err := setupDB(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sqlDB.Exec(`DROP TABLE article_fts; DROP TRIGGER article_archive_fts_ai;
+		INSERT INTO article_archive (key, title, text_content) VALUES ('https://old/1', 'Old', 'pre-existing zeppelin text')`); err != nil {
+		t.Fatal(err)
+	}
+	sqlDB.Close()
+
+	sqlDB, err = setupDB(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := sqlDB.QueryRow(`SELECT COUNT(*) FROM article_fts WHERE doc MATCH 'zeppelin'`).Scan(&n); err != nil || n != 1 {
+		t.Errorf("backfilled matches = %d, %v", n, err)
+	}
+	// A second startup must not index the row twice.
+	sqlDB.Close()
+	if sqlDB, err = setupDB(path); err != nil {
+		t.Fatal(err)
+	}
+	defer sqlDB.Close()
+	sqlDB.QueryRow(`SELECT COUNT(*) FROM article_fts WHERE doc MATCH 'zeppelin'`).Scan(&n)
+	if n != 1 {
+		t.Errorf("matches after restart = %d", n)
+	}
+}
+
 func TestNewServeMux(t *testing.T) {
 	mux := app.newServeMux()
 	// Unauthenticated request to a protected route with an allowed origin should

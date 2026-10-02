@@ -95,3 +95,26 @@ CREATE TABLE IF NOT EXISTS feed_items (
     comments_url   TEXT,
     UNIQUE(feed_url, item_url)
 );
+
+-- Full-text index over archived article text. Contentless (stores only the
+-- index, not a second copy of the text); rows are keyed by article_archive's
+-- rowid and kept in sync by the triggers below.
+CREATE VIRTUAL TABLE IF NOT EXISTS article_fts USING fts5(
+    doc,
+    content='',
+    contentless_delete=1,
+    tokenize='porter unicode61 remove_diacritics 2'
+);
+
+CREATE TRIGGER IF NOT EXISTS article_archive_fts_ai AFTER INSERT ON article_archive BEGIN
+    INSERT INTO article_fts (rowid, doc) VALUES (new.rowid, new.title || ' ' || new.text_content);
+END;
+
+CREATE TRIGGER IF NOT EXISTS article_archive_fts_ad AFTER DELETE ON article_archive BEGIN
+    DELETE FROM article_fts WHERE rowid = old.rowid;
+END;
+
+CREATE TRIGGER IF NOT EXISTS article_archive_fts_au AFTER UPDATE OF title, text_content ON article_archive BEGIN
+    DELETE FROM article_fts WHERE rowid = old.rowid;
+    INSERT INTO article_fts (rowid, doc) VALUES (new.rowid, new.title || ' ' || new.text_content);
+END;
