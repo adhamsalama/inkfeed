@@ -3,12 +3,29 @@
 var archiveOffset = 0;
 var archivePageSize = 50;
 var archiveArticles = [];
+// Non-empty while the archive list shows full-text search results.
+var archiveQuery = "";
+// Bumped whenever the list is cleared so late responses for it are dropped.
+var archiveListGeneration = 0;
 
-function resetArchiveState() {
+function clearArchiveList() {
+    archiveListGeneration++;
     archiveOffset = 0;
     archiveArticles = [];
     document.getElementById("archive-article-list").innerHTML = "";
     addClass(document.getElementById("archive-load-more"), "hidden");
+    addClass(document.getElementById("archive-empty"), "hidden");
+}
+
+function resetArchiveSearch() {
+    archiveQuery = "";
+    document.getElementById("archive-search-input").value = "";
+    addClass(document.getElementById("archive-search-clear"), "hidden");
+}
+
+function resetArchiveState() {
+    clearArchiveList();
+    resetArchiveSearch();
     var btn = document.getElementById("show-archive-btn");
     addClass(btn, "hidden");
     btn.onclick = showFeedArchive;
@@ -28,10 +45,8 @@ function showLiveFeed() {
 
 function showFeedArchive() {
     if (!AuthState.isLoggedIn()) return;
-    archiveOffset = 0;
-    archiveArticles = [];
-    document.getElementById("archive-article-list").innerHTML = "";
-    addClass(document.getElementById("archive-load-more"), "hidden");
+    clearArchiveList();
+    resetArchiveSearch();
     // Hide live feed, show archive section
     addClass(document.getElementById("article-list"), "hidden");
     removeClass(document.getElementById("feed-archive-section"), "hidden");
@@ -46,6 +61,25 @@ function loadMoreArchive() {
     loadArchivePage();
 }
 
+function searchFeedArchive() {
+    if (!AuthState.isLoggedIn()) return;
+    var query = document.getElementById("archive-search-input").value.replace(/^\s+|\s+$/g, "");
+    if (!query) {
+        clearFeedArchiveSearch();
+        return;
+    }
+    archiveQuery = query;
+    removeClass(document.getElementById("archive-search-clear"), "hidden");
+    clearArchiveList();
+    loadArchivePage();
+}
+
+function clearFeedArchiveSearch() {
+    resetArchiveSearch();
+    clearArchiveList();
+    loadArchivePage();
+}
+
 function loadArchivePage() {
     var feedUrl = AppState.lastLoadedFeedUrl;
     if (!feedUrl) return;
@@ -53,9 +87,15 @@ function loadArchivePage() {
     removeClass(document.getElementById("archive-loading"), "hidden");
     addClass(document.getElementById("archive-load-more"), "hidden");
 
-    BackendClient.fetchFeedArchive(feedUrl, archivePageSize, archiveOffset, function(error, data) {
+    var query = archiveQuery;
+    var generation = archiveListGeneration;
+    var onPage = function(error, data) {
+        if (generation !== archiveListGeneration) return;
         addClass(document.getElementById("archive-loading"), "hidden");
         if (error || !data || !data.articles) return;
+        if (query && archiveArticles.length === 0 && data.articles.length === 0) {
+            removeClass(document.getElementById("archive-empty"), "hidden");
+        }
 
         var newArticles = data.articles;
         for (var i = 0; i < newArticles.length; i++) {
@@ -70,7 +110,13 @@ function loadArchivePage() {
         if (data.hasMore) {
             removeClass(document.getElementById("archive-load-more"), "hidden");
         }
-    });
+    };
+
+    if (query) {
+        BackendClient.searchFeedArchive(feedUrl, query, archivePageSize, archiveOffset, onPage);
+    } else {
+        BackendClient.fetchFeedArchive(feedUrl, archivePageSize, archiveOffset, onPage);
+    }
 }
 
 function renderArchiveArticles(articles) {
