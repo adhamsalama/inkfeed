@@ -12,15 +12,30 @@ var archiveMode = false;
 // Saved feeds ({url, title}) that the search row searches; empty hides it.
 var archiveSearchFeeds = [];
 
-// Shows the search row for a saved feed or group; pass [] to hide it.
+// Shows the Search button for a saved feed or group; pass [] to hide it.
+// The search row itself starts closed either way.
 function setArchiveSearchFeeds(feeds) {
     archiveSearchFeeds = AuthState.isLoggedIn() ? (feeds || []) : [];
-    var row = document.getElementById("archive-search-row");
+    var btn = document.getElementById("search-toggle-btn");
     if (archiveSearchFeeds.length > 0) {
-        removeClass(row, "hidden");
+        removeClass(btn, "hidden");
     } else {
-        addClass(row, "hidden");
+        addClass(btn, "hidden");
     }
+    deactivateToggle("archive-search-row", "search-toggle-btn");
+}
+
+// Opens or closes the search row. Closing it also leaves any search results.
+function toggleArchiveSearch() {
+    var row = document.getElementById("archive-search-row");
+    if (row.className.indexOf("hidden") < 0) {
+        deactivateToggle("archive-search-row", "search-toggle-btn");
+        if (archiveQuery) clearFeedArchiveSearch();
+        return;
+    }
+    removeClass(row, "hidden");
+    addClass(document.getElementById("search-toggle-btn"), "btn-active");
+    document.getElementById("archive-search-input").focus();
 }
 
 function clearArchiveList() {
