@@ -79,6 +79,21 @@ function getText(el) {
   return el.textContent || el.innerText || "";
 }
 
+// Helper: convert an HTML fragment to plain text without building DOM nodes.
+// Parsing via innerHTML would create <img> elements that start downloading
+// (and run onerror handlers) even in a detached element. A textarea's content
+// is never parsed as markup, so it only decodes entities like &amp;.
+function htmlToText(html) {
+  if (!html) return "";
+  var stripped = String(html)
+    .replace(/<(script|style)[^>]*>[\s\S]*?<\/\1\s*>/gi, " ")
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/<[^>]*>/g, " ");
+  var textarea = document.createElement("textarea");
+  textarea.innerHTML = stripped;
+  return textarea.value.replace(/\s+/g, " ").replace(/^\s+|\s+$/g, "");
+}
+
 // Helper: set text content safely
 function setText(el, text) {
   if (!el) return;
