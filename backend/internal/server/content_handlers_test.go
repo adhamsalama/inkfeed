@@ -233,3 +233,47 @@ func mustJSON(t *testing.T, w *httptest.ResponseRecorder, v any) {
 		t.Fatalf("decode response: %v (body=%s)", err, w.Body.String())
 	}
 }
+
+func TestFeedArchiveSearchHandler(t *testing.T) {
+	resetDB(t)
+	ctx := context.Background()
+	uid := createTestUser(t, "search@example.com")
+	other := createTestUser(t, "other@example.com")
+	app.q.InsertUserSavedFeed(ctx, savedFeedParams(uid, "feedS"))
+	app.q.InsertFeedItem(ctx, db.InsertFeedItemParams{FeedUrl: "feedS", ItemUrl: "https://s/1", Title: "Hello"})
+	app.content.ArchiveArticle("https://s/1", "Hello", "", "", "", "", "a story about lighthouses")
+
+	call := func(userID int64, query string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/feed-archive/search?"+query, nil).WithContext(userContext(userID))
+		app.feedArchiveSearchHandler(w, req)
+		return w
+	}
+
+	if w := call(uid, "url=feedS"); w.Code != http.StatusBadRequest {
+		t.Errorf("missing q = %d", w.Code)
+	}
+	if w := call(uid, "q=x"); w.Code != http.StatusBadRequest {
+		t.Errorf("missing url = %d", w.Code)
+	}
+	if w := call(other, "url=feedS&q=lighthouse"); w.Code != http.StatusForbidden {
+		t.Errorf("unsaved feed = %d", w.Code)
+	}
+
+	w := call(uid, "url=feedS&q=lighthouse&limit=5")
+	if w.Code != http.StatusOK {
+		t.Fatalf("search = %d %s", w.Code, w.Body.String())
+	}
+	var page struct {
+		Total    int `json:"total"`
+		Articles []struct {
+			Link        string `json:"link"`
+			Description string `json:"description"`
+		} `json:"articles"`
+	}
+	mustJSON(t, w, &page)
+	if page.Total != 1 || len(page.Articles) != 1 || page.Articles[0].Link != "https://s/1" ||
+		!strings.Contains(page.Articles[0].Description, "lighthouses") {
+		t.Errorf("search page = %+v", page)
+	}
+}

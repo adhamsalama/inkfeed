@@ -22,6 +22,26 @@ func (q *Queries) CountFeedArchiveItems(ctx context.Context, feedUrl string) (in
 	return count, err
 }
 
+const countSearchFeedArchive = `-- name: CountSearchFeedArchive :one
+SELECT COUNT(*)
+FROM article_fts
+JOIN article_archive a ON a.rowid = article_fts.rowid
+JOIN feed_items fi ON fi.item_url = a.key
+WHERE article_fts.doc MATCH ? AND fi.feed_url = ?
+`
+
+type CountSearchFeedArchiveParams struct {
+	Doc     string
+	FeedUrl string
+}
+
+func (q *Queries) CountSearchFeedArchive(ctx context.Context, arg CountSearchFeedArchiveParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countSearchFeedArchive, arg.Doc, arg.FeedUrl)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createSession = `-- name: CreateSession :exec
 INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)
 `
@@ -630,6 +650,67 @@ func (q *Queries) MarkFeedItemArchiveFailed(ctx context.Context, itemUrl string)
 	return err
 }
 
+const searchFeedArchive = `-- name: SearchFeedArchive :many
+SELECT fi.item_url, fi.title, fi.description, fi.pub_date, fi.comments_url, a.text_content
+FROM article_fts
+JOIN article_archive a ON a.rowid = article_fts.rowid
+JOIN feed_items fi ON fi.item_url = a.key
+WHERE article_fts.doc MATCH ? AND fi.feed_url = ?
+ORDER BY article_fts.rank
+LIMIT ? OFFSET ?
+`
+
+type SearchFeedArchiveParams struct {
+	Doc     string
+	FeedUrl string
+	Limit   int64
+	Offset  int64
+}
+
+type SearchFeedArchiveRow struct {
+	ItemUrl     string
+	Title       string
+	Description string
+	PubDate     string
+	CommentsUrl sql.NullString
+	TextContent string
+}
+
+func (q *Queries) SearchFeedArchive(ctx context.Context, arg SearchFeedArchiveParams) ([]SearchFeedArchiveRow, error) {
+	rows, err := q.db.QueryContext(ctx, searchFeedArchive,
+		arg.Doc,
+		arg.FeedUrl,
+		arg.Limit,
+		arg.Offset,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SearchFeedArchiveRow
+	for rows.Next() {
+		var i SearchFeedArchiveRow
+		if err := rows.Scan(
+			&i.ItemUrl,
+			&i.Title,
+			&i.Description,
+			&i.PubDate,
+			&i.CommentsUrl,
+			&i.TextContent,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updateUserPassword = `-- name: UpdateUserPassword :exec
 UPDATE users SET password_hash = ? WHERE id = ?
 `
@@ -749,4 +830,20 @@ func (q *Queries) UpsertUserPreferences(ctx context.Context, arg UpsertUserPrefe
 		arg.GroupSortByDate,
 	)
 	return err
+}
+
+const userHasSavedFeed = `-- name: UserHasSavedFeed :one
+SELECT EXISTS (SELECT 1 FROM user_saved_feeds WHERE user_id = ? AND url = ?)
+`
+
+type UserHasSavedFeedParams struct {
+	UserID int64
+	Url    string
+}
+
+func (q *Queries) UserHasSavedFeed(ctx context.Context, arg UserHasSavedFeedParams) (bool, error) {
+	row := q.db.QueryRowContext(ctx, userHasSavedFeed, arg.UserID, arg.Url)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
 }

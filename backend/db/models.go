@@ -21,6 +21,10 @@ type ArticleArchive struct {
 	UpdatedAt   time.Time
 }
 
+type ArticleFt struct {
+	Doc string
+}
+
 type FeedItem struct {
 	ID            int64
 	FeedUrl       string

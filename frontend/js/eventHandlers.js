@@ -164,6 +164,25 @@
             }
         }
 
+        // Archive search input Enter key handler
+        var archiveSearchInput = document.getElementById("archive-search-input");
+        if (archiveSearchInput) {
+            if (archiveSearchInput.addEventListener) {
+                archiveSearchInput.addEventListener("keypress", function(e) {
+                    var key = e.key || e.keyCode;
+                    if (key === "Enter" || key === 13) {
+                        searchFeedArchive();
+                    }
+                });
+            } else if (archiveSearchInput.attachEvent) {
+                archiveSearchInput.attachEvent("onkeypress", function(e) {
+                    if (e.keyCode === 13) {
+                        searchFeedArchive();
+                    }
+                });
+            }
+        }
+
         // Feed input Enter key handler
         var feedInput = document.getElementById("feed-url");
         if (feedInput) {
