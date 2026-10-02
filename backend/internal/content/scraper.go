@@ -212,6 +212,8 @@ type ArchiveArticle struct {
 	Description string `json:"description"`
 	PubDate     string `json:"pubDate"`
 	Comments    string `json:"comments"`
+	// FeedURL is set on search results, which can span several feeds.
+	FeedURL string `json:"feedUrl,omitempty"`
 }
 
 // FeedArchivePage is a paginated slice of a feed's archived items.

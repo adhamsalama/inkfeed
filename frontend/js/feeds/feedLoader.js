@@ -7,6 +7,21 @@ var archiveArticles = [];
 var archiveQuery = "";
 // Bumped whenever the list is cleared so late responses for it are dropped.
 var archiveListGeneration = 0;
+// True while the Archived view is shown (as opposed to the live feed).
+var archiveMode = false;
+// Saved feeds ({url, title}) that the search row searches; empty hides it.
+var archiveSearchFeeds = [];
+
+// Shows the search row for a saved feed or group; pass [] to hide it.
+function setArchiveSearchFeeds(feeds) {
+    archiveSearchFeeds = AuthState.isLoggedIn() ? (feeds || []) : [];
+    var row = document.getElementById("archive-search-row");
+    if (archiveSearchFeeds.length > 0) {
+        removeClass(row, "hidden");
+    } else {
+        addClass(row, "hidden");
+    }
+}
 
 function clearArchiveList() {
     archiveListGeneration++;
@@ -24,8 +39,10 @@ function resetArchiveSearch() {
 }
 
 function resetArchiveState() {
+    archiveMode = false;
     clearArchiveList();
     resetArchiveSearch();
+    setArchiveSearchFeeds([]);
     var btn = document.getElementById("show-archive-btn");
     addClass(btn, "hidden");
     btn.onclick = showFeedArchive;
@@ -36,6 +53,10 @@ function resetArchiveState() {
 }
 
 function showLiveFeed() {
+    archiveMode = false;
+    clearArchiveList();
+    resetArchiveSearch();
+    addClass(document.getElementById("archive-loading"), "hidden");
     addClass(document.getElementById("feed-archive-section"), "hidden");
     removeClass(document.getElementById("article-list"), "hidden");
     var btn = document.getElementById("show-archive-btn");
@@ -45,6 +66,7 @@ function showLiveFeed() {
 
 function showFeedArchive() {
     if (!AuthState.isLoggedIn()) return;
+    archiveMode = true;
     clearArchiveList();
     resetArchiveSearch();
     // Hide live feed, show archive section
@@ -71,10 +93,18 @@ function searchFeedArchive() {
     archiveQuery = query;
     removeClass(document.getElementById("archive-search-clear"), "hidden");
     clearArchiveList();
+    // Results replace whichever list is showing, live or archived.
+    addClass(document.getElementById("article-list"), "hidden");
+    removeClass(document.getElementById("feed-archive-section"), "hidden");
     loadArchivePage();
 }
 
+// Leaves search results and returns to the view the search started from.
 function clearFeedArchiveSearch() {
+    if (!archiveMode) {
+        showLiveFeed();
+        return;
+    }
     resetArchiveSearch();
     clearArchiveList();
     loadArchivePage();
@@ -82,7 +112,7 @@ function clearFeedArchiveSearch() {
 
 function loadArchivePage() {
     var feedUrl = AppState.lastLoadedFeedUrl;
-    if (!feedUrl) return;
+    if (!archiveQuery && !feedUrl) return;
 
     removeClass(document.getElementById("archive-loading"), "hidden");
     addClass(document.getElementById("archive-load-more"), "hidden");
@@ -99,6 +129,10 @@ function loadArchivePage() {
 
         var newArticles = data.articles;
         for (var i = 0; i < newArticles.length; i++) {
+            // Name the source feed when results can come from several.
+            if (archiveSearchFeeds.length > 1 && newArticles[i].feedUrl) {
+                newArticles[i].feedPrefix = archiveSearchFeedTitle(newArticles[i].feedUrl);
+            }
             newArticles[i].index = archiveArticles.length;
             archiveArticles.push(newArticles[i]);
         }
@@ -113,10 +147,21 @@ function loadArchivePage() {
     };
 
     if (query) {
-        BackendClient.searchFeedArchive(feedUrl, query, archivePageSize, archiveOffset, onPage);
+        var urls = [];
+        for (var j = 0; j < archiveSearchFeeds.length; j++) {
+            urls.push(archiveSearchFeeds[j].url);
+        }
+        BackendClient.searchFeedArchive(urls, query, archivePageSize, archiveOffset, onPage);
     } else {
         BackendClient.fetchFeedArchive(feedUrl, archivePageSize, archiveOffset, onPage);
     }
+}
+
+function archiveSearchFeedTitle(url) {
+    for (var i = 0; i < archiveSearchFeeds.length; i++) {
+        if (archiveSearchFeeds[i].url === url) return archiveSearchFeeds[i].title || url;
+    }
+    return url;
 }
 
 function renderArchiveArticles(articles) {
@@ -142,7 +187,7 @@ function renderArchiveArticles(articles) {
 
         var title = document.createElement("span");
         title.className = "article-title";
-        setText(title, article.title);
+        setText(title, article.feedPrefix ? article.feedPrefix + " \u2014 " + article.title : article.title);
         titleRow.appendChild(title);
 
         if (article.pubDate) {
@@ -319,6 +364,9 @@ function loadFeed() {
                 if (AuthState.isLoggedIn() && SavedFeedsManager.isFeedArchiveEnabled(url)) {
                     removeClass(document.getElementById("show-archive-btn"), "hidden");
                 }
+                if (SavedFeedsManager.isSavedFeed(url)) {
+                    setArchiveSearchFeeds([{ url: url, title: AppState.lastLoadedFeedTitle }]);
+                }
             });
             return;
         }
@@ -345,6 +393,9 @@ function loadFeed() {
                 FeedRenderer.renderArticleList(parsed.articles);
                 if (AuthState.isLoggedIn() && SavedFeedsManager.isFeedArchiveEnabled(url)) {
                     removeClass(document.getElementById("show-archive-btn"), "hidden");
+                }
+                if (SavedFeedsManager.isSavedFeed(url)) {
+                    setArchiveSearchFeeds([{ url: url, title: AppState.lastLoadedFeedTitle }]);
                 }
             } catch (e) {
                 ViewManager.showInputView();
@@ -378,6 +429,8 @@ function loadCategoryFeeds(categoryFeeds, categoryName) {
     ViewManager.hideError("input-error");
     removeClass(document.getElementById("feed-loading"), "hidden");
     document.getElementById("article-list").innerHTML = "";
+    // Don't carry the previous feed's archive view or button into this list.
+    resetArchiveState();
     ViewManager.showFeedView();
     setText(document.getElementById("feed-title"), categoryName);
     document.title = categoryName;

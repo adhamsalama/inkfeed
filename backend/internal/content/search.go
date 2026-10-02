@@ -29,27 +29,27 @@ func FTSQuery(raw string) string {
 	return strings.Join(terms, " ")
 }
 
-// SearchFeedArchive full-text searches the archived articles of a feed. Each
-// result's Description is an HTML-escaped excerpt of the article text around
-// the first match, falling back to the feed item's own description.
-func (s *Service) SearchFeedArchive(feedURL, query string, limit, offset int64) (FeedArchivePage, error) {
+// SearchFeedArchive full-text searches the archived articles of the given
+// feeds. Each result's Description is an HTML-escaped excerpt of the article
+// text around the first match, falling back to the feed item's own description.
+func (s *Service) SearchFeedArchive(feedURLs []string, query string, limit, offset int64) (FeedArchivePage, error) {
 	ctx := context.Background()
 	match := FTSQuery(query)
-	if match == "" {
+	if match == "" || len(feedURLs) == 0 {
 		return FeedArchivePage{Articles: []ArchiveArticle{}}, nil
 	}
 
 	rows, err := s.q.SearchFeedArchive(ctx, db.SearchFeedArchiveParams{
-		Doc:     match,
-		FeedUrl: feedURL,
-		Limit:   limit,
-		Offset:  offset,
+		Doc:      match,
+		FeedUrls: feedURLs,
+		Limit:    limit,
+		Offset:   offset,
 	})
 	if err != nil {
 		return FeedArchivePage{}, err
 	}
 
-	total, err := s.q.CountSearchFeedArchive(ctx, db.CountSearchFeedArchiveParams{Doc: match, FeedUrl: feedURL})
+	total, err := s.q.CountSearchFeedArchive(ctx, db.CountSearchFeedArchiveParams{Doc: match, FeedUrls: feedURLs})
 	if err != nil {
 		total = 0
 	}
@@ -63,6 +63,7 @@ func (s *Service) SearchFeedArchive(feedURL, query string, limit, offset int64) 
 		}
 		articles[i] = ArchiveArticle{
 			Index:       int(offset) + i,
+			FeedURL:     row.FeedUrl,
 			Title:       row.Title,
 			Link:        row.ItemUrl,
 			Description: desc,
