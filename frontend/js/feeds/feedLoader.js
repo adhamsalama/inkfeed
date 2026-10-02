@@ -160,9 +160,7 @@ function renderArchiveArticles(articles) {
 
         var desc = document.createElement("div");
         desc.className = "article-description";
-        var tempDiv = document.createElement("div");
-        tempDiv.innerHTML = article.description;
-        var plainText = getText(tempDiv);
+        var plainText = htmlToText(article.description);
         var truncated = plainText.substring(0, 200);
         if (plainText.length > 200) truncated += "...";
         setText(desc, truncated);
