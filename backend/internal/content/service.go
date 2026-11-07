@@ -7,7 +7,7 @@ package content
 import "github.com/adhamsalama/inkfeed-backend/db"
 
 // UserAgent is sent on every outbound scraping/image request.
-const UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+const UserAgent = "Inkfeed/1.0 (+https://inkfeed.xyz)"
 
 // Service is the content-acquisition capability. ProxyURL is the (optional)
 // CORS/scraping proxy base URL; q is the persistence layer for the archive.
