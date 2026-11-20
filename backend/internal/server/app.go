@@ -10,6 +10,7 @@ import (
 	"github.com/adhamsalama/inkfeed-backend/db"
 	"github.com/adhamsalama/inkfeed-backend/internal/content"
 	"github.com/adhamsalama/inkfeed-backend/internal/email"
+	"github.com/adhamsalama/inkfeed-backend/internal/safehttp"
 )
 
 // defaultAllowedOrigins and defaultProxyURL are the baseline configuration,
@@ -110,6 +111,8 @@ func (a *App) applyEnvConfig() {
 	}
 	if os.Getenv("ENV") == "local" {
 		a.allowedOrigins = append(a.allowedOrigins, "http://localhost:8000")
+		// Allow fetching feeds/articles served from localhost during development.
+		safehttp.SetAllowPrivateNetworks(true)
 	}
 	if v := os.Getenv("FEED_PROXY_URL"); v != "" {
 		a.content.ProxyURL = v

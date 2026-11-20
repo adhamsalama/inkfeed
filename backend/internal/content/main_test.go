@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/adhamsalama/inkfeed-backend/db"
+	"github.com/adhamsalama/inkfeed-backend/internal/safehttp"
 	_ "modernc.org/sqlite"
 )
 
@@ -19,6 +20,9 @@ var (
 )
 
 func TestMain(m *testing.M) {
+	// Tests fetch from local httptest servers.
+	safehttp.SetAllowPrivateNetworks(true)
+
 	dir, err := os.MkdirTemp("", "content-test-*")
 	if err != nil {
 		panic(err)

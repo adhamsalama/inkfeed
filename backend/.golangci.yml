@@ -1,0 +1,40 @@
+version: "2"
+
+linters:
+  enable:
+    - bodyclose
+    - noctx
+    - sqlclosecheck
+    - rowserrcheck
+    - errorlint
+    - gosec
+    - contextcheck
+    - nilerr
+    - gocritic
+    - revive
+    - misspell
+    - unconvert
+    - usestdlibvars
+    - perfsprint
+    - copyloopvar
+    - intrange
+  settings:
+    errcheck:
+      exclude-functions:
+        - (io.Closer).Close
+        - (*encoding/json.Encoder).Encode
+        - github.com/joho/godotenv.Load
+  exclusions:
+    paths:
+      - db # sqlc-generated
+    rules:
+      - path: _test\.go
+        linters:
+          - errcheck
+          - gosec
+          - noctx
+
+formatters:
+  enable:
+    - gofumpt
+    - goimports

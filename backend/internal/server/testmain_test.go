@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/adhamsalama/inkfeed-backend/db"
+	"github.com/adhamsalama/inkfeed-backend/internal/safehttp"
 	_ "modernc.org/sqlite"
 )
 
@@ -21,6 +22,9 @@ var app *App
 // schema between calls) initialized from db/schema.sql, and wires it into the
 // package-global queries variable that all handlers use.
 func TestMain(m *testing.M) {
+	// Tests fetch from local httptest servers.
+	safehttp.SetAllowPrivateNetworks(true)
+
 	dir, err := os.MkdirTemp("", "inkfeed-test-*")
 	if err != nil {
 		panic(err)

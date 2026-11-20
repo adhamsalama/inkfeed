@@ -14,12 +14,18 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	_ "golang.org/x/image/webp"
 
 	"github.com/adhamsalama/inkfeed-backend/internal/content"
+	"github.com/adhamsalama/inkfeed-backend/internal/safehttp"
 	epub "github.com/go-shiori/go-epub"
 )
+
+// imageClient downloads images referenced by article HTML. Image URLs come
+// from third-party content, so non-public destinations are refused.
+var imageClient = safehttp.NewClient(30 * time.Second)
 
 var (
 	imgSrcRe   = regexp.MustCompile(`(?i)<img\s[^>]*\bsrc="(https?://[^"]+)"[^>]*>`)
@@ -122,7 +128,7 @@ func downloadAndEmbedImages(bodyHTML string) (string, []embeddedImage) {
 			return match
 		}
 		imgReq.Header.Set("User-Agent", content.UserAgent)
-		resp, err := http.DefaultClient.Do(imgReq)
+		resp, err := imageClient.Do(imgReq)
 		if err != nil {
 			log.Printf("epub: failed to download image %s: %v", srcURL, err)
 			return match

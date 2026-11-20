@@ -6,8 +6,12 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/adhamsalama/inkfeed-backend/internal/safehttp"
 	readability "github.com/go-shiori/go-readability"
 )
+
+// Tests fetch images from local httptest servers.
+func init() { safehttp.SetAllowPrivateNetworks(true) }
 
 // fakeFetcher implements Fetcher without any network: it returns a canned
 // article for each URL (unless listed in fail) and canned comments.
