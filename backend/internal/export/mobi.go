@@ -119,7 +119,7 @@ func downloadAndEmbedMobiImages(bodyHTML string) (string, [][]byte) {
 				return imgTag
 			}
 			imgReq.Header.Set("User-Agent", content.UserAgent)
-			resp, err := http.DefaultClient.Do(imgReq)
+			resp, err := imageClient.Do(imgReq)
 			if err != nil {
 				log.Printf("mobi: failed to download image %s: %v", useURL, err)
 				return imgTag

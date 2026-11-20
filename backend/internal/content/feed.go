@@ -6,9 +6,11 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
+	"github.com/adhamsalama/inkfeed-backend/internal/safehttp"
 	"github.com/mmcdole/gofeed"
 	gofeedrss "github.com/mmcdole/gofeed/rss"
 )
@@ -28,19 +30,23 @@ type FeedResponse struct {
 	Articles []Article `json:"articles"`
 }
 
-// FetchAndParseFeed fetches and parses a feed URL, falling back to the proxy on failure.
-func (s *Service) FetchAndParseFeed(feedURL string) (FeedResponse, error) {
+// feedTransport accepts legacy TLS cipher suites (some feed hosts still need
+// them) and refuses to connect to non-public addresses. Shared so connections
+// are pooled across fetches.
+var feedTransport = func() *http.Transport {
 	allSuites := append(tls.CipherSuites(), tls.InsecureCipherSuites()...)
 	cipherIDs := make([]uint16, len(allSuites))
 	for i, s := range allSuites {
 		cipherIDs[i] = s.ID
 	}
-	client := &http.Client{
-		Timeout: 30 * time.Second,
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{CipherSuites: cipherIDs},
-		},
-	}
+	t := safehttp.NewTransport()
+	t.TLSClientConfig = &tls.Config{CipherSuites: cipherIDs}
+	return t
+}()
+
+// FetchAndParseFeed fetches and parses a feed URL, falling back to the proxy on failure.
+func (s *Service) FetchAndParseFeed(feedURL string) (FeedResponse, error) {
+	client := &http.Client{Timeout: 30 * time.Second, Transport: feedTransport}
 
 	req, err := http.NewRequest("GET", feedURL, nil)
 	if err != nil {
@@ -64,7 +70,7 @@ func (s *Service) FetchAndParseFeed(feedURL string) (FeedResponse, error) {
 	}
 
 	log.Printf("retrying %s via proxy", feedURL)
-	proxyURL := s.ProxyURL + "?url=" + feedURL
+	proxyURL := s.ProxyURL + "?url=" + url.QueryEscape(feedURL)
 	proxyReq, err := http.NewRequest("GET", proxyURL, nil)
 	if err != nil {
 		return FeedResponse{}, err

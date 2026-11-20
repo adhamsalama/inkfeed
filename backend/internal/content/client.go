@@ -3,7 +3,10 @@ package content
 import (
 	"fmt"
 	"net/http"
+	"net/url"
 	"time"
+
+	"github.com/adhamsalama/inkfeed-backend/internal/safehttp"
 )
 
 type ScrappingClientConfig struct {
@@ -20,7 +23,7 @@ func (s *Service) newClient(cfg ScrappingClientConfig) *ScrappingYoungLad {
 		proxyURL = &p
 	}
 	return &ScrappingYoungLad{
-		Client:        &http.Client{Timeout: cfg.Timeout},
+		Client:        safehttp.NewClient(cfg.Timeout),
 		ProxyURL:      proxyURL,
 		UseProxyFirst: cfg.UseProxyFirst,
 		UserAgent:     &ua,
@@ -40,14 +43,15 @@ func (c *ScrappingYoungLad) doDirectRequest(req *http.Request) (*http.Response, 
 }
 
 func (c *ScrappingYoungLad) doProxyRequest(req *http.Request) (*http.Response, error) {
-	proxyReq, err := http.NewRequest(req.Method, *c.ProxyURL+"?url="+req.URL.String(), req.Body)
+	// Host is the configured proxy; the target URL is only an escaped query param.
+	proxyReq, err := http.NewRequestWithContext(req.Context(), req.Method, *c.ProxyURL+"?url="+url.QueryEscape(req.URL.String()), req.Body) //nolint:gosec // G704: see above
 	if err != nil {
 		fmt.Printf("failed to create proxy request for %s: %v\n", req.URL.String(), err)
 		return nil, err
 	}
 	proxyReq.Header = req.Header.Clone()
 	fmt.Printf("attempting proxy request to %s via %s\n", req.URL.String(), *c.ProxyURL)
-	return c.Client.Do(proxyReq)
+	return c.Client.Do(proxyReq) //nolint:gosec // G704: dial is guarded by safehttp
 }
 
 func (c *ScrappingYoungLad) generateDirectAndProxyError(directErr, proxyErr error) error {
